@@ -68,7 +68,8 @@ const botOptions = {
   port: 25565,
   username: 'sigmaoyuncu',          // Oyunda görünecek bot adı
   version: '1.21.1',                       // 1.21.11 sunucuları için bu şekilde kalmalı
-  auth: 'offline'
+  auth: 'offline',
+  hideErrors: true                         // Sunucudan gelen geçersiz paket hatalarını gizler ve botun çökmesini engeller
 };
 
 let bot;
@@ -108,7 +109,12 @@ function startBot() {
   });
 
   bot.on('error', (err) => {
-    sendToWebConsole(`Hata: ${err.message}`, 'system');
+    // Kırmızı VarInt paket hataları geldiğinde sistemi çökertmek yerine hafifçe log geçip bağlantıyı taze tutar
+    if (err.message.includes('VarInt') || err.message.includes('buffer')) {
+      sendToWebConsole('Sunucudan geçersiz veri paketi algılandı, hata bastırıldı ve bot korunuyor.', 'system');
+    } else {
+      sendToWebConsole(`Hata: ${err.message}`, 'system');
+    }
   });
 }
 

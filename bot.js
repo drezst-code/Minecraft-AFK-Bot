@@ -102,7 +102,7 @@ BOT_CONFIGS.forEach((cfg, index) => {
   });
 });
 
-// Socket.IO
+// Socket.IO Katmanı
 io.use((socket, next) => {
   if (socket.handshake.auth?.password === PANEL_PASSWORD) return next();
   next(new Error('Panel şifresi yanlış'));
@@ -162,20 +162,26 @@ io.on('connection', socket => {
   });
 });
 
+// WebSocket Upgrade - Çökmeye sebep olan regex yapısı güvenli string ayrıştırmaya dönüştürüldü
 server.on('upgrade', (req, socket, head) => {
-  const m = req.url?.match(/^\/view\/([A-Za-z0-9_]{3,16})/);
-  if (!m) return socket.destroy();
-  const username = m[1]; 
-  if (!validBot(username)) return socket.destroy();
-  const url = new URL(req.url, 'http://x');
-  if (url.searchParams.get('panelPassword') !== PANEL_PASSWORD) return socket.destroy();
-  const proxy = viewerProxies.get(username);
+  if (!req.url) return socket.destroy();
+  const parts = req.url.split('/');
+  if (parts[1] !== 'view' || !parts[2]) return socket.destroy();
+  
+  const rawUser = parts[2].split('?')[0];
+  if (!validBot(rawUser)) return socket.destroy();
+  
+  const urlObj = new URL(req.url, 'http://127.0.0.1');
+  if (urlObj.searchParams.get('panelPassword') !== PANEL_PASSWORD) return socket.destroy();
+  
+  const proxy = viewerProxies.get(rawUser);
   if (!proxy) return socket.destroy();
-  req.url = req.url.replace(`/view/${username}`, '') || '/';
-  try { 
-    proxy.upgrade(req, socket, head); 
-  } catch (e) { 
-    socket.destroy(); 
+  
+  req.url = req.url.replace(`/view/${rawUser}`, '') || '/';
+  try {
+    proxy.upgrade(req, socket, head);
+  } catch (e) {
+    socket.destroy();
   }
 });
 
@@ -186,6 +192,7 @@ function updateBotBehavior(bot, state) {
   }
   state.loops = [];
 
+  // MOD 1: Sadece Zıpla ve Süreli Vur (Etrafa rastgele bakıp tıklamaz!)
   if (state.currentMode === 'just-jump') {
     bot.clearControlStates();
     
@@ -208,6 +215,7 @@ function updateBotBehavior(bot, state) {
 
     state.loops.push(jumpLoop, attackLoop);
   }
+  // MOD 2: Dondur (10 dakikada bir anti-kick zıplaması yapar, hareketsiz kalır)
   else if (state.currentMode === 'freeze') {
     bot.clearControlStates();
     
@@ -219,6 +227,7 @@ function updateBotBehavior(bot, state) {
 
     state.loops.push(freezeLoop);
   }
+  // MOD 3: Klasik Nuekkis (Rastgele gezinme modu)
   else if (state.currentMode === 'nuekkis') {
     const afk = setInterval(() => {
       if (!bot.entity) return;
@@ -283,14 +292,3 @@ function startBot(cfg, delay = 0) {
     bot.once('spawn', () => {
       state.connected = true;
       io.emit('bot-status', { username: cfg.username, connected: true });
-      console.log(`[${cfg.username}] spawn oldu`);
-
-      setTimeout(() => {
-        if (activeBots.get(cfg.username) === state) {
-          bot.chat(`/login ${cfg.password}`);
-          console.log(`[${cfg.username}] /login gönderildi`);
-          updateBotBehavior(bot, state);
-        }
-      }, 1800);
-
-      if (!state.viewerStarted) {

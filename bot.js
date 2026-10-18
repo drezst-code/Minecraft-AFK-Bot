@@ -15,6 +15,7 @@ const MC_HOST = process.env.MC_HOST || 'maven.play.hosting';
 const MC_PORT = Number(process.env.MC_PORT || 25565);
 const MC_VERSION = process.env.MC_VERSION || '1.21.1';
 
+// BOT_CONFIGS_JSON yoksa varsayılan botlar
 let BOT_CONFIGS = [];
 try {
   if (process.env.BOT_CONFIGS_JSON) {
@@ -37,7 +38,7 @@ try {
 
 console.log(`Panel şifresi: ${PANEL_PASSWORD}`);
 
-// ===================== WEB SERVER =====================
+// ===================== WEB =====================
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
@@ -62,13 +63,14 @@ function requirePassword(req, res, next) {
 
 app.get('/healthz', (_req, res) => res.status(200).send('ok'));
 
-app.use(express.static(__dirname));
+// Statik dosyalar + ana sayfa
+app.use(express.static(path.join(__dirname, 'public')));
 app.get('/', (_req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 app.get('/bot/:username', (req, res) => {
   if (!validBot(req.params.username)) return res.status(404).send('Bot bulunamadı');
-  res.sendFile(path.join(__dirname, 'bot.html'));
+  res.sendFile(path.join(__dirname, 'public', 'bot.html'));
 });
 
 app.get('/api/bots', requirePassword, (_req, res) => {
@@ -78,7 +80,7 @@ app.get('/api/bots', requirePassword, (_req, res) => {
   }));
 });
 
-// Viewer proxy ayarları
+// Viewer proxy
 BOT_CONFIGS.forEach((cfg, index) => {
   const viewerPort = 3100 + index;
   const proxy = createProxyMiddleware({
@@ -102,7 +104,7 @@ BOT_CONFIGS.forEach((cfg, index) => {
   });
 });
 
-// Socket.IO Katmanı
+// Socket.IO
 io.use((socket, next) => {
   if (socket.handshake.auth?.password === PANEL_PASSWORD) return next();
   next(new Error('Panel şifresi yanlış'));
@@ -148,114 +150,22 @@ io.on('connection', socket => {
     if (!Number.isFinite(yaw) || !Number.isFinite(pitch)) return;
     state.bot.look(yaw, Math.max(-Math.PI/2, Math.min(Math.PI/2, pitch)), true).catch(() => {});
   });
-
-  socket.on('set-bot-mode', data => {
-    if (!data || !validBot(data.botName)) return;
-    const state = activeBots.get(data.botName);
-    if (!state || !state.bot) return;
-
-    state.currentMode = data.mode;
-    if (data.attackSeconds) {
-      state.attackIntervalMs = Number(data.attackSeconds) * 1000;
-    }
-    updateBotBehavior(state.bot, state);
-  });
 });
 
-// WebSocket Upgrade - Çökmeye sebep olan regex yapısı güvenli string ayrıştırmaya dönüştürüldü
 server.on('upgrade', (req, socket, head) => {
-  if (!req.url) return socket.destroy();
-  const parts = req.url.split('/');
-  if (parts[1] !== 'view' || !parts[2]) return socket.destroy();
-  
-  const rawUser = parts[2].split('?')[0];
-  if (!validBot(rawUser)) return socket.destroy();
-  
-  const urlObj = new URL(req.url, 'http://127.0.0.1');
-  if (urlObj.searchParams.get('panelPassword') !== PANEL_PASSWORD) return socket.destroy();
-  
-  const proxy = viewerProxies.get(rawUser);
+  const m = req.url?.match(/^\/view\/([A-Za-z0-9_]{3,16})/);
+  if (!m) return;
+  const username = m[1];
+  if (!validBot(username)) return socket.destroy();
+  const url = new URL(req.url, 'http://x');
+  if (url.searchParams.get('panelPassword') !== PANEL_PASSWORD) return socket.destroy();
+  const proxy = viewerProxies.get(username);
   if (!proxy) return socket.destroy();
-  
-  req.url = req.url.replace(`/view/${rawUser}`, '') || '/';
-  try {
-    proxy.upgrade(req, socket, head);
-  } catch (e) {
-    socket.destroy();
-  }
+  req.url = req.url.replace(`/view/${username}`, '') || '/';
+  try { proxy.upgrade(req, socket, head); } catch { socket.destroy(); }
 });
 
-// ===================== MOD MEKANİZMALARI =====================
-function updateBotBehavior(bot, state) {
-  if (state.loops) {
-    state.loops.forEach(l => clearInterval(l));
-  }
-  state.loops = [];
-
-  // MOD 1: Sadece Zıpla ve Süreli Vur (Etrafa rastgele bakıp tıklamaz!)
-  if (state.currentMode === 'just-jump') {
-    bot.clearControlStates();
-    
-    const jumpLoop = setInterval(() => {
-      if (!bot.entity) return;
-      bot.setControlState('jump', true);
-      setTimeout(() => { if (bot.entity) bot.setControlState('jump', false); }, 500);
-    }, 6000);
-
-    const attackMs = state.attackIntervalMs || 1000;
-    const attackLoop = setInterval(() => {
-      if (!bot.entity) return;
-      const block = bot.blockAtCursor(4);
-      if (block && block.type !== 0) {
-        bot.dig(block, true).catch(() => {});
-      } else {
-        bot.swingArm();
-      }
-    }, attackMs);
-
-    state.loops.push(jumpLoop, attackLoop);
-  }
-  // MOD 2: Dondur (10 dakikada bir anti-kick zıplaması yapar, hareketsiz kalır)
-  else if (state.currentMode === 'freeze') {
-    bot.clearControlStates();
-    
-    const freezeLoop = setInterval(() => {
-      if (!bot.entity) return;
-      bot.setControlState('jump', true);
-      setTimeout(() => { if (bot.entity) bot.setControlState('jump', false); }, 500);
-    }, 10 * 60 * 1000);
-
-    state.loops.push(freezeLoop);
-  }
-  // MOD 3: Klasik Nuekkis (Rastgele gezinme modu)
-  else if (state.currentMode === 'nuekkis') {
-    const afk = setInterval(() => {
-      if (!bot.entity) return;
-      bot.setControlState('jump', Math.random() > 0.5);
-      bot.setControlState('sneak', Math.random() > 0.6);
-      const yaw = (Math.random() - 0.5) * Math.PI;
-      const pitch = (Math.random() - 0.5) * (Math.PI / 2);
-      bot.look(yaw, pitch, false).catch(() => {});
-      setTimeout(() => {
-        if (bot.entity) {
-          bot.setControlState('jump', false);
-          bot.setControlState('sneak', false);
-        }
-      }, 1000);
-    }, 6000);
-
-    const farm = setInterval(() => {
-      if (!bot.entity) return;
-      const block = bot.blockAtCursor(4); 
-      if (block && block.type !== 0) bot.dig(block, true).catch(() => {});
-      else bot.swingArm();
-    }, 1200);
-
-    state.loops.push(afk, farm);
-  }
-}
-
-// ===================== BOT YÖNETİMİ =====================
+// ===================== BOTLAR =====================
 function scheduleReconnect(cfg) {
   const cur = activeBots.get(cfg.username);
   if (cur?.reconnectTimer) return;
@@ -263,7 +173,7 @@ function scheduleReconnect(cfg) {
     if (!activeBots.get(cfg.username)?.bot) startBot(cfg);
   }, 12000);
   if (cur) cur.reconnectTimer = t;
-  else activeBots.set(cfg.username, { bot: null, connected: false, reconnectTimer: t, viewerStarted: false, currentMode: 'just-jump', attackIntervalMs: 1000, loops: [] });
+  else activeBots.set(cfg.username, { bot: null, connected: false, reconnectTimer: t, viewerStarted: false });
 }
 
 function startBot(cfg, delay = 0) {
@@ -286,9 +196,58 @@ function startBot(cfg, delay = 0) {
       return;
     }
 
-    const state = { bot, connected: false, reconnectTimer: null, viewerStarted: false, currentMode: 'just-jump', attackIntervalMs: 1000, loops: [] };
+    const state = { bot, connected: false, reconnectTimer: null, viewerStarted: false };
     activeBots.set(cfg.username, state);
 
     bot.once('spawn', () => {
       state.connected = true;
       io.emit('bot-status', { username: cfg.username, connected: true });
+      console.log(`[${cfg.username}] spawn oldu`);
+
+      setTimeout(() => {
+        if (activeBots.get(cfg.username) === state) {
+          bot.chat(`/login ${cfg.password}`);
+          console.log(`[${cfg.username}] /login gönderildi`);
+        }
+      }, 1800);
+
+      if (!state.viewerStarted) {
+        const idx = BOT_CONFIGS.findIndex(c => c.username === cfg.username);
+        try {
+          mineflayerViewer(bot, { port: 3100 + idx, firstPerson: false, viewDistance: 4 });
+          state.viewerStarted = true;
+          console.log(`[${cfg.username}] viewer açıldı`);
+        } catch (e) {
+          console.error(`[${cfg.username}] viewer hata: ${e.message}`);
+        }
+      }
+    });
+
+    bot.on('message', msg => {
+      io.to(`bot:${cfg.username}`).emit('log', { text: msg.toString() });
+    });
+
+    bot.on('end', () => {
+      state.connected = false;
+      if (activeBots.get(cfg.username) === state) activeBots.delete(cfg.username);
+      io.emit('bot-status', { username: cfg.username, connected: false });
+      scheduleReconnect(cfg);
+    });
+
+    bot.on('error', err => console.error(`[${cfg.username}] ${err.message}`));
+  }, delay);
+}
+
+// ===================== BAŞLAT =====================
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`Panel hazır → port ${PORT}`);
+  BOT_CONFIGS.forEach((cfg, i) => startBot(cfg, i * 3500));
+});
+
+process.on('SIGTERM', () => {
+  for (const s of activeBots.values()) {
+    if (s.reconnectTimer) clearTimeout(s.reconnectTimer);
+    try { s.bot?.quit(); } catch {}
+  }
+  process.exit(0);
+});

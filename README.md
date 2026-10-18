@@ -1,50 +1,77 @@
-# Minecraft-AFK-Bot — Render web kontrol paneli
+# Maven Minecraft Bot Panel
 
-## Neler var?
-- Beş Mineflayer botu için ayrı seçim ve ayrı canlı konsol odası
-- Tarayıcıdan chat/komut gönderme
-- WASD, zıplama, koşma ve eğilme kontrolleri
-- Fare hareketiyle botun bakış yönünü değiştirme (görüntü alanında sağ fare tuşunu basılı tutarak sürükle)
-- Prismarine Viewer üzerinden tarayıcıda dünya görüntüsü
-- Panel için şifreli Socket.IO bağlantısı
+Web üzerinden kontrol edilebilen, çoklu Mineflayer botları için modern kontrol paneli.  
+Render.com üzerinde tek port ile çalışacak şekilde tasarlandı. Prismarine Viewer ile tarayıcıda 3D dünya görüntüsü.
 
-## Önemli görüntüleme notu
-`prismarine-viewer` içinde `firstPerson: false`, klasik omuz üstü üçüncü şahıs kamerasından ziyade kuşbakışı/dışarıdan dünya görünümüdür. Bu paket, Minecraft istemcisinin tam üçüncü şahıs kamerasını birebir taklit etmez. Fareyle bakış kontrolü botun `look()` yönünü değiştirir.
+## Özellikler
 
-## GitHub'a yüklemeden önce
-1. Daha önce kaynak kodda paylaştığın Minecraft giriş şifrelerini değiştir.
-2. `config` veya `.env` içinde gerçek şifre tutma.
-3. `PANEL_PASSWORD` ve `BOT_CONFIGS_JSON` değerlerini Render > Environment bölümünde tanımla.
-4. Repo içindeki eski `bot.js` ve `package.json` dosyalarını bu pakettekilerle değiştir; `public/index.html` dosyasını da ekle.
+- Birden fazla botu aynı panelden seçip kontrol etme
+- Canlı sohbet / komut konsolu
+- WASD + zıpla + eğil + koş hareket kontrolleri (klavye + dokunmatik butonlar)
+- Fare ile bakış yönü değiştirme
+- Prismarine Viewer üzerinden canlı 3D dünya görünümü (proxy ile tek porttan)
+- Panel şifresi ile korunan Socket.IO ve API
+- Otomatik yeniden bağlanma
+- Render uyumlu (PORT ortam değişkeni, 0.0.0.0 dinleme, health check)
 
-## Render ayarları
-- Service type: Web Service
-- Build Command: `npm install`
-- Start Command: `npm start`
-- Node: 20 veya üstü
-- Render `PORT` değişkenini otomatik sağlar; uygulama `0.0.0.0` üzerinde dinler.
-- Ücretsiz Render web servisleri hareketsiz kalınca uykuya geçebilir; bu yüzden ücretsiz planda 7/24 bot bağlantısı garanti değildir.
+## Kurulum (Yerel)
 
-## Environment Variables
-`PANEL_PASSWORD` = uzun, tahmin edilmesi zor panel parolası.
-
-`BOT_CONFIGS_JSON` = tek satırlık JSON dizisi, tam beş bot:
-```json
-[{"username":"BotAdi1","password":"SunucuSifresi1"},{"username":"BotAdi2","password":"SunucuSifresi2"},{"username":"BotAdi3","password":"SunucuSifresi3"},{"username":"BotAdi4","password":"SunucuSifresi4"},{"username":"BotAdi5","password":"SunucuSifresi5"}]
-```
-
-Ayrıca `MC_HOST`, `MC_PORT`, `MC_VERSION` değişkenlerini istersen değiştir.
-
-## Test
-Yerelde:
 ```bash
 npm install
 ```
-`PANEL_PASSWORD` ve `BOT_CONFIGS_JSON` ortam değişkenlerini ayarla, sonra:
+
+`.env` dosyası oluştur (veya ortam değişkenlerini ayarla):
+
+```env
+PORT=10000
+PANEL_PASSWORD=en_az_12_karakterlik_guclu_sifre
+MC_HOST=maven.play.hosting
+MC_PORT=25565
+MC_VERSION=1.21.1
+BOT_CONFIGS_JSON=[{"username":"BOT1","password":"SUNUCU_SIFRESI_1"},{"username":"BOT2","password":"SUNUCU_SIFRESI_2"}]
+```
+
 ```bash
 npm start
 ```
+
 Tarayıcıda `http://localhost:10000` aç.
 
-## Dikkat
-Bu bir başlangıç uygulamasıdır; Render'a deploy etmeden önce test et. Viewer proxy/WebSocket yönlendirmesi, Render üzerinde ve kullandığın `prismarine-viewer` sürümünde doğrulanmalıdır. Botların bağlandığı Minecraft sunucusunun botlara izin vermesi gerekir.
+## Render Deploy
+
+1. GitHub deposunu **Private** yap (bot şifreleri ortam değişkeninde tutulur ama yine de dikkatli ol).
+2. Yeni **Web Service** oluştur.
+3. Build Command: `npm install`
+4. Start Command: `npm start`
+5. Environment Variables ekle:
+   - `PANEL_PASSWORD` → uzun, tahmin edilmesi zor şifre
+   - `BOT_CONFIGS_JSON` → tek satır JSON (yukarıdaki gibi)
+   - `MC_HOST`, `MC_PORT`, `MC_VERSION` (isteğe bağlı, varsayılanlar mevcut)
+6. Deploy et.
+
+Ücretsiz Render planında servis hareketsiz kalınca uykuya geçer. 7/24 bağlantı için ücretli plan gerekir.
+
+## Önemli Uyarılar
+
+- Bot hesaplarının şifrelerini asla kaynak koduna veya GitHub'a yazma. Sadece Environment Variables kullan.
+- Daha önce paylaştığın gerçek Minecraft şifrelerini hemen değiştir.
+- Sunucunun botlara izin vermesi gerekir. Offline mode + `/login` komutu kullanılıyor.
+- Prismarine Viewer'ın WebSocket proxy'si Render üzerinde test edilmelidir. Sorun çıkarsa viewDistance değerini düşür.
+- Bu bir başlangıç / kontrol paneli uygulamasıdır. Üretim kullanımı için ek güvenlik önlemleri düşün.
+
+## Dosya Yapısı
+
+```
+bot.js
+package.json
+public/
+  index.html
+  bot.html
+README.md
+.env.example
+.gitignore
+```
+
+## Lisans
+
+MIT

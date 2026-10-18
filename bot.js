@@ -152,8 +152,8 @@ io.on('connection', socket => {
 
 server.on('upgrade', (req, socket, head) => {
   const m = req.url?.match(/^\/view\/([A-Za-z0-9_]{3,16})/);
-  if (!m) return;
-  const username = m[1];
+  if (!m) return socket.destroy();
+  const username = m[1]; // Eski koddaki kritik yönlendirme hatası düzeltildi
   if (!validBot(username)) return socket.destroy();
   const url = new URL(req.url, 'http://x');
   if (url.searchParams.get('panelPassword') !== PANEL_PASSWORD) return socket.destroy();
@@ -165,44 +165,37 @@ server.on('upgrade', (req, socket, head) => {
 
 // ===================== NUEKKIS AFK & FARM ENTEGRASYONU =====================
 function startNuekkisLoop(bot) {
-  // 1. Döngü: Klasik Nuekkis Wiggle (Rastgele Zıplama, Eğilme, Sağa Sola Bakma)
+  // 1. Döngü: Klasik Nuekkis Wiggle (Rastgele Hareketler)
   const afkInterval = setInterval(() => {
     if (!bot || !bot.entity) return;
 
-    // Rastgele zıpla ve eğil
     bot.setControlState('jump', Math.random() > 0.5);
     bot.setControlState('sneak', Math.random() > 0.6);
     
-    // Rastgele sağa sola bakarak sunucunun AFK algılamasını tamamen sıfırla
     const yaw = (Math.random() - 0.5) * Math.PI;
     const pitch = (Math.random() - 0.5) * (Math.PI / 2);
     bot.look(yaw, pitch, false).catch(() => {});
 
-    // Kısa süre sonra hareket durumlarını sıfırla ki takılı kalmasın
     setTimeout(() => {
       if (bot.entity) {
         bot.setControlState('jump', false);
         bot.setControlState('sneak', false);
       }
     }, 1000);
+  }, 6000);
 
-  }, 6000); // Her 6 saniyede bir tetiklenir
-
-  // 2. Döngü: Otomatik Önündeki Bloğu Kazma / Sol Tık Atma (Kırıktaş/Kaktüs Farmları İçin)
+  // 2. Döngü: Otomatik Sol Tık / Kazma Döngüsü
   const farmInterval = setInterval(() => {
     if (!bot || !bot.entity) return;
 
-    // Botun tam önündeki (baktığı yerdeki) bloğu tespit etmesi
     const block = bot.blockAtCursor(4); 
-    if (block && block.type !== 0) { // Eğer önünde boşluk (hava) dışında bir blok varsa kaz
+    if (block && block.type !== 0) {
       bot.dig(block, true).catch(() => {});
     } else {
-      // Eğer önünde blok yoksa, elindeki aletle boşa sol tık vur (Punch)
       bot.swingArm();
     }
-  }, 1200); // Her 1.2 saniyede bir vurur veya kazar
+  }, 1200);
 
-  // Bot sunucudan düştüğünde zamanlayıcıları temizle
   bot.once('end', () => {
     clearInterval(afkInterval);
     clearInterval(farmInterval);
@@ -248,18 +241,14 @@ function startBot(cfg, delay = 0) {
       io.emit('bot-status', { username: cfg.username, connected: true });
       console.log(`[${cfg.username}] spawn oldu`);
 
-      // AuthMe Login Gönderimi
       setTimeout(() => {
         if (activeBots.get(cfg.username) === state) {
           bot.chat(`/login ${cfg.password}`);
           console.log(`[${cfg.username}] /login gönderildi`);
-          
-          // Login yaptıktan hemen sonra Nuekkis AFK & Farm döngüsünü başlat
           startNuekkisLoop(bot);
         }
       }, 1800);
 
-      // 3D Dünya İzleyici (Prismarine Viewer)
       if (!state.viewerStarted) {
         const idx = BOT_CONFIGS.findIndex(c => c.username === cfg.username);
         try {
@@ -283,3 +272,20 @@ function startBot(cfg, delay = 0) {
       scheduleReconnect(cfg);
     });
 
+    bot.on('error', err => console.error(`[${cfg.username}] ${err.message}`));
+  }, delay);
+}
+
+// ===================== BAŞLAT =====================
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`Panel hazır → port ${PORT}`);
+  BOT_CONFIGS.forEach((cfg, i) => startBot(cfg, i * 3500));
+});
+
+process.on('SIGTERM', () => {
+  for (const s of activeBots.values()) {
+    if (s.reconnectTimer) clearTimeout(s.reconnectTimer);
+    try { s.bot?.quit(); } catch {}
+  }
+  process.exit(0);
+});

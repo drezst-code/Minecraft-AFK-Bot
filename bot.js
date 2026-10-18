@@ -15,7 +15,6 @@ const MC_HOST = process.env.MC_HOST || 'maven.play.hosting';
 const MC_PORT = Number(process.env.MC_PORT || 25565);
 const MC_VERSION = process.env.MC_VERSION || '1.21.1';
 
-// BOT_CONFIGS_JSON yoksa varsayılan botlar
 let BOT_CONFIGS = [];
 try {
   if (process.env.BOT_CONFIGS_JSON) {
@@ -38,7 +37,7 @@ try {
 
 console.log(`Panel şifresi: ${PANEL_PASSWORD}`);
 
-// ===================== WEB =====================
+// ===================== WEB SERVER =====================
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
@@ -63,7 +62,6 @@ function requirePassword(req, res, next) {
 
 app.get('/healthz', (_req, res) => res.status(200).send('ok'));
 
-// Statik dosyalar + ana sayfa
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/', (_req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -80,7 +78,7 @@ app.get('/api/bots', requirePassword, (_req, res) => {
   }));
 });
 
-// Viewer proxy
+// Viewer proxy ayarları
 BOT_CONFIGS.forEach((cfg, index) => {
   const viewerPort = 3100 + index;
   const proxy = createProxyMiddleware({
@@ -165,7 +163,53 @@ server.on('upgrade', (req, socket, head) => {
   try { proxy.upgrade(req, socket, head); } catch { socket.destroy(); }
 });
 
-// ===================== BOTLAR =====================
+// ===================== NUEKKIS AFK & FARM ENTEGRASYONU =====================
+function startNuekkisLoop(bot) {
+  // 1. Döngü: Klasik Nuekkis Wiggle (Rastgele Zıplama, Eğilme, Sağa Sola Bakma)
+  const afkInterval = setInterval(() => {
+    if (!bot || !bot.entity) return;
+
+    // Rastgele zıpla ve eğil
+    bot.setControlState('jump', Math.random() > 0.5);
+    bot.setControlState('sneak', Math.random() > 0.6);
+    
+    // Rastgele sağa sola bakarak sunucunun AFK algılamasını tamamen sıfırla
+    const yaw = (Math.random() - 0.5) * Math.PI;
+    const pitch = (Math.random() - 0.5) * (Math.PI / 2);
+    bot.look(yaw, pitch, false).catch(() => {});
+
+    // Kısa süre sonra hareket durumlarını sıfırla ki takılı kalmasın
+    setTimeout(() => {
+      if (bot.entity) {
+        bot.setControlState('jump', false);
+        bot.setControlState('sneak', false);
+      }
+    }, 1000);
+
+  }, 6000); // Her 6 saniyede bir tetiklenir
+
+  // 2. Döngü: Otomatik Önündeki Bloğu Kazma / Sol Tık Atma (Kırıktaş/Kaktüs Farmları İçin)
+  const farmInterval = setInterval(() => {
+    if (!bot || !bot.entity) return;
+
+    // Botun tam önündeki (baktığı yerdeki) bloğu tespit etmesi
+    const block = bot.blockAtCursor(4); 
+    if (block && block.type !== 0) { // Eğer önünde boşluk (hava) dışında bir blok varsa kaz
+      bot.dig(block, true).catch(() => {});
+    } else {
+      // Eğer önünde blok yoksa, elindeki aletle boşa sol tık vur (Punch)
+      bot.swingArm();
+    }
+  }, 1200); // Her 1.2 saniyede bir vurur veya kazar
+
+  // Bot sunucudan düştüğünde zamanlayıcıları temizle
+  bot.once('end', () => {
+    clearInterval(afkInterval);
+    clearInterval(farmInterval);
+  });
+}
+
+// ===================== BOT YÖNETİMİ =====================
 function scheduleReconnect(cfg) {
   const cur = activeBots.get(cfg.username);
   if (cur?.reconnectTimer) return;
@@ -204,13 +248,18 @@ function startBot(cfg, delay = 0) {
       io.emit('bot-status', { username: cfg.username, connected: true });
       console.log(`[${cfg.username}] spawn oldu`);
 
+      // AuthMe Login Gönderimi
       setTimeout(() => {
         if (activeBots.get(cfg.username) === state) {
           bot.chat(`/login ${cfg.password}`);
           console.log(`[${cfg.username}] /login gönderildi`);
+          
+          // Login yaptıktan hemen sonra Nuekkis AFK & Farm döngüsünü başlat
+          startNuekkisLoop(bot);
         }
       }, 1800);
 
+      // 3D Dünya İzleyici (Prismarine Viewer)
       if (!state.viewerStarted) {
         const idx = BOT_CONFIGS.findIndex(c => c.username === cfg.username);
         try {
@@ -234,20 +283,3 @@ function startBot(cfg, delay = 0) {
       scheduleReconnect(cfg);
     });
 
-    bot.on('error', err => console.error(`[${cfg.username}] ${err.message}`));
-  }, delay);
-}
-
-// ===================== BAŞLAT =====================
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Panel hazır → port ${PORT}`);
-  BOT_CONFIGS.forEach((cfg, i) => startBot(cfg, i * 3500));
-});
-
-process.on('SIGTERM', () => {
-  for (const s of activeBots.values()) {
-    if (s.reconnectTimer) clearTimeout(s.reconnectTimer);
-    try { s.bot?.quit(); } catch {}
-  }
-  process.exit(0);
-});

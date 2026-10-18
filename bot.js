@@ -62,13 +62,14 @@ function requirePassword(req, res, next) {
 
 app.get('/healthz', (_req, res) => res.status(200).send('ok'));
 
-app.use(express.static(path.join(__dirname, 'public')));
+// DÜZELTME: Statik dosyalar public klasörü yerine doğrudan ana klasörden (root) okunuyor
+app.use(express.static(__dirname));
 app.get('/', (_req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  res.sendFile(path.join(__dirname, 'index.html'));
 });
 app.get('/bot/:username', (req, res) => {
   if (!validBot(req.params.username)) return res.status(404).send('Bot bulunamadı');
-  res.sendFile(path.join(__dirname, 'public', 'bot.html'));
+  res.sendFile(path.join(__dirname, 'bot.html'));
 });
 
 app.get('/api/bots', requirePassword, (_req, res) => {
@@ -153,7 +154,7 @@ io.on('connection', socket => {
 server.on('upgrade', (req, socket, head) => {
   const m = req.url?.match(/^\/view\/([A-Za-z0-9_]{3,16})/);
   if (!m) return socket.destroy();
-  const username = m;
+  const username = m[1];
   if (!validBot(username)) return socket.destroy();
   const url = new URL(req.url, 'http://x');
   if (url.searchParams.get('panelPassword') !== PANEL_PASSWORD) return socket.destroy();
@@ -275,7 +276,6 @@ function startBot(cfg, delay = 0) {
 }
 
 // ===================== BAŞLAT =====================
-// Render port taramasını geçmesi için host adresi '0.0.0.0' açıkça eklendi
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Panel hazır → port ${PORT}`);
   BOT_CONFIGS.forEach((cfg, i) => startBot(cfg, i * 3500));

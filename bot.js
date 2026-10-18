@@ -1,179 +1,244 @@
+require('dotenv').config();
+
 const mineflayer = require('mineflayer');
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
+const { mineflayer: mineflayerViewer } = require('prismarine-viewer');
+const { createProxyMiddleware } = require('http-proxy-middleware');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, { cors: { origin: false } });
 
-// --- SUNUCU SABİT AYARLARI ---
-const SERVER_HOST = 'maven.play.hosting';
-const SERVER_PORT = 25565;
+const PORT = Number(process.env.PORT || 10000);
+const HOST = process.env.MC_HOST || 'maven.play.hosting';
+const MC_PORT = Number(process.env.MC_PORT || 25565);
+const MC_VERSION = process.env.MC_VERSION || '1.21.1';
+const PANEL_PASSWORD = process.env.PANEL_PASSWORD;
 
-// Girdiğin 5 botun isimleri ve sunucudaki giriş şifreleri (Şifreleri kendine göre düzeltebilirsin brom)
-const BOT_CONFIGS = [
-  { username: 'thetuffman', password: 'sigma12321' },
-  { username: 'sigmaoyuncu', password: 'sigma12321' },
-  { username: 'pikachufn', password: 'sigma12321' },
-  { username: 'tr_tier1', password: 'sigma12321' },
-  { username: 'smpseverrr', password: 'sigma12321' }
-];
-
-// --- DİNAMİK KONSOL SAYFASI ALTYAPISI ---
-// Her kullanıcı adı için özel bir web sayfası yolu (/sigmaoyuncu, /pikachufn vb.) oluşturuyoruz
-BOT_CONFIGS.forEach(cfg => {
-  app.get(`/${cfg.username}`, (req, res) => {
-    res.send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>${cfg.username} Özel Konsolu</title>
-        <meta charset="utf-8">
-        <style>
-          body { background: #121212; color: #00FF00; font-family: monospace; padding: 20px; margin: 0; }
-          h2 { color: #fff; margin-top: 0; border-bottom: 2px solid #333; padding-bottom: 10px; }
-          #console { background: #000; border: 1px solid #333; height: 450px; padding: 10px; overflow-y: scroll; margin-bottom: 10px; border-radius: 5px; }
-          .log-entry { margin-bottom: 5px; white-space: pre-wrap; }
-          #input-container { display: flex; }
-          #cmd { flex: 1; padding: 12px; background: #222; border: 1px solid #444; color: #fff; font-family: monospace; font-size: 16px; border-radius: 3px 0 0 3px; }
-          #btn { padding: 12px 25px; background: #00FF00; border: none; color: #000; font-weight: bold; cursor: pointer; border-radius: 0 3px 3px 0; }
-          .system { color: #00bfff; }
-          .chat { color: #ffffff; }
-        </style>
-      </head>
-      <body>
-        <h2>🖥️ ${cfg.username} Canlı Yönetim Masası</h2>
-        <div id="console"></div>
-        <div id="input-container">
-          <input type="text" id="cmd" placeholder="${cfg.username} olarak chate veya komut gönder...">
-          <button id="btn" onclick="sendCmd()">Gönder</button>
-        </div>
-        <script src="/socket.io/socket.io.js"></script>
-        <script>
-          const socket = io();
-          const cons = document.getElementById('console');
-          const myUser = "${cfg.username}";
-          
-          socket.on('log-' + myUser, (data) => {
-            const div = document.createElement('div');
-            div.className = 'log-entry ' + data.type;
-            div.innerText = data.text;
-            cons.appendChild(div);
-            cons.scrollTop = cons.scrollHeight;
-          });
-
-          function sendCmd() {
-            const val = document.getElementById('cmd').value;
-            if(!val) return;
-            socket.emit('command', { botName: myUser, text: val });
-            document.getElementById('cmd').value = '';
-          }
-
-          document.getElementById('cmd').addEventListener('keypress', (e) => {
-            if(e.key === 'Enter') sendCmd();
-          });
-        </script>
-      </body>
-      </html>
-    `);
-  });
-});
-
-// Ana linke girildiğinde botların rehber listesini gösterir
-app.get('/', (req, res) => {
-  let links = BOT_CONFIGS.map(c => `<li><a href="/${c.username}" style="color: #00FF00; font-size: 18px;">${c.username} Konsolunu Aç</a></li>`).join('');
-  res.send(`
-    <body style="background: #121212; color: white; font-family: monospace; padding: 40px;">
-      <h2>🤖 Çoklu Bot Ana Portalı</h2>
-      <p>Yönetmek istediğin karakterin özel konsoluna tıklayarak bağlanabilirsin brom:</p>
-      <ul>${links}</ul>
-    </body>
-  `);
-});
-
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Çoklu Konsol Sistemi Aktif.`));
-
-// --- BOTLARIN BAŞLATILMA ALTYAPISI ---
-const activeBots = {};
-
-function sendToBotConsole(botName, text, type = 'system') {
-  console.log(`[${botName.toUpperCase()}] [${type.toUpperCase()}] ${text}`);
-  io.emit('log-' + botName, { text: `[${new Date().toLocaleTimeString()}] ${text}`, type });
+if (!PANEL_PASSWORD || PANEL_PASSWORD.length < 12) {
+  console.error('PANEL_PASSWORD ortam değişkenini en az 12 karakter olarak ayarla.');
+  process.exit(1);
 }
 
-function initBot(cfg, delay) {
-  // Sunucunun bot korumasına yakalanmamak için 5 saniye aralıklarla girerler
+let botConfigs;
+try {
+  botConfigs = JSON.parse(process.env.BOT_CONFIGS_JSON || '[]');
+} catch {
+  console.error('BOT_CONFIGS_JSON geçerli JSON değil.');
+  process.exit(1);
+}
+if (!Array.isArray(botConfigs) || botConfigs.length !== 5) {
+  console.error('BOT_CONFIGS_JSON içinde tam olarak 5 bot tanımlamalısın.');
+  process.exit(1);
+}
+for (const cfg of botConfigs) {
+  if (!cfg.username || !cfg.password || !/^[A-Za-z0-9_]{3,16}$/.test(cfg.username)) {
+    console.error('Her botta geçerli username ve password olmalı.');
+    process.exit(1);
+  }
+}
+
+app.use(express.static('public', { index: false }));
+
+// Simple password gate for the control panel and all Socket.IO actions.
+app.get('/', (req, res) => res.sendFile(require('path').join(__dirname, 'public', 'index.html')));
+app.get('/healthz', (_req, res) => res.status(200).send('ok'));
+
+const sessions = new Map();
+const viewerProxies = [];
+
+function safeName(name) {
+  return botConfigs.some(c => c.username === name);
+}
+
+function logBot(username, text, type = 'system') {
+  const entry = { text: `[${new Date().toLocaleTimeString()}] ${text}`, type };
+  console.log(`[${username}] ${text}`);
+  io.to(`bot:${username}`).emit('log', entry);
+}
+
+function clearControls(bot) {
+  if (!bot) return;
+  for (const key of ['forward', 'back', 'left', 'right', 'jump', 'sprint', 'sneak']) {
+    try { bot.setControlState(key, false); } catch {}
+  }
+}
+
+function startBot(cfg, delay = 0) {
   setTimeout(() => {
-    sendToBotConsole(cfg.username, 'Bot sunucuya 1.21.1 protokolü ile bağlanıyor...');
-    
-    const bot = mineflayer.createBot({
-      host: SERVER_HOST,
-      port: SERVER_PORT,
-      username: cfg.username,
-      version: '1.21.1',
-      auth: 'offline',
-      hideErrors: true // Sürüm paket hatalarını yutar, botları düşürmez
-    });
+    if (sessions.has(cfg.username) && sessions.get(cfg.username).bot) return;
+    logBot(cfg.username, `Minecraft sunucusuna bağlanılıyor (${MC_VERSION})...`);
+    let bot;
+    try {
+      bot = mineflayer.createBot({
+        host: HOST,
+        port: MC_PORT,
+        username: cfg.username,
+        version: MC_VERSION,
+        auth: 'offline',
+        hideErrors: false
+      });
+    } catch (err) {
+      logBot(cfg.username, `Bot başlatılamadı: ${err.message}`, 'error');
+      return;
+    }
 
-    bot.on('spawn', () => {
-      sendToBotConsole(cfg.username, 'Sunucuya başarıyla giriş yaptı ve dünyada doğdu!', 'system');
-      
-      // Giriş şifresini otomatik yazar
+    const state = { bot, connected: false, viewerStarted: false, reconnectTimer: null };
+    sessions.set(cfg.username, state);
+
+    bot.once('spawn', () => {
+      state.connected = true;
+      logBot(cfg.username, 'Sunucuya bağlandı ve dünyada doğdu.');
       setTimeout(() => {
-        bot.chat(`/login ${cfg.password}`);
-        sendToBotConsole(cfg.username, 'Otomatik giriş şifresi gönderildi.', 'system');
-      }, 3000);
+        if (bot.player) {
+          bot.chat(`/login ${cfg.password}`);
+          logBot(cfg.username, 'Giriş komutu gönderildi.');
+        }
+      }, 2500);
 
-      // Her botun arkada anti-AFK için 15 saniyede bir hafifçe zıplama döngüsü
-      const jumpInterval = setInterval(() => {
-        if (!bot || !bot.entity) return;
-        bot.setControlState('jump', true);
-        setTimeout(() => { if(bot) bot.setControlState('jump', false); }, 500);
-      }, 15000 + Math.random() * 3000);
-      
-      bot._jumpInterval = jumpInterval;
-    });
-
-    // Sadece bu botun gördüğü chati kendi özel konsoluna aktarır
-    bot.on('chat', (sender, message) => {
-      if (sender === cfg.username) return; // Kendi yazdığını loglama
-      sendToBotConsole(cfg.username, `<${sender}> ${message}`, 'chat');
-    });
-
-    bot.on('end', (reason) => {
-      sendToBotConsole(cfg.username, `Bağlantı koptu (${reason}). 20 saniye sonra tekrar bağlanacak...`, 'system');
-      clearInterval(bot._jumpInterval);
-      delete activeBots[cfg.username];
-      setTimeout(() => initBot(cfg, 0), 20000);
-    });
-
-    bot.on('error', (err) => {
-      if (!err.message.includes('VarInt') && !err.message.includes('buffer')) {
-        sendToBotConsole(cfg.username, `Hata algılandı: ${err.message}`, 'system');
+      // Each viewer has an internal port; Express proxies it through the single Render public port.
+      if (!state.viewerStarted) {
+        state.viewerStarted = true;
+        const viewerPort = 3100 + botConfigs.findIndex(c => c.username === cfg.username);
+        try {
+          mineflayerViewer(bot, {
+            port: viewerPort,
+            firstPerson: false,
+            viewDistance: 5
+          });
+          logBot(cfg.username, `Dünya görüntüsü hazır (viewer port ${viewerPort}).`);
+        } catch (err) {
+          logBot(cfg.username, `Görüntüleyici başlatılamadı: ${err.message}`, 'error');
+        }
       }
     });
 
-    activeBots[cfg.username] = bot;
+    bot.on('chat', (sender, message) => {
+      if (sender !== cfg.username) logBot(cfg.username, `<${sender}> ${message}`, 'chat');
+    });
 
+    bot.on('message', (jsonMsg) => {
+      const text = jsonMsg.toString();
+      if (text && !text.includes(cfg.username)) logBot(cfg.username, text, 'chat');
+    });
+
+    bot.on('kicked', reason => logBot(cfg.username, `Sunucudan atıldı: ${String(reason)}`, 'error'));
+    bot.on('error', err => logBot(cfg.username, `Bağlantı hatası: ${err.message}`, 'error'));
+
+    bot.on('end', reason => {
+      state.connected = false;
+      clearControls(bot);
+      logBot(cfg.username, `Bağlantı kesildi: ${String(reason || 'bilinmeyen neden')}. 20 saniye sonra yeniden denenecek.`);
+      if (sessions.get(cfg.username) === state) sessions.delete(cfg.username);
+      if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
+      state.reconnectTimer = setTimeout(() => startBot(cfg, 0), 20000);
+    });
   }, delay);
 }
 
-// 5 Botu sırayla ateşle
-BOT_CONFIGS.forEach((cfg, index) => {
-  initBot(cfg, index * 5000);
-});
-
-// Konsollardan gelen komutları sadece ilgili bota yönlendirme küpü
-io.on('connection', (socket) => {
-  socket.on('command', (data) => {
-    const targetBot = activeBots[data.botName];
-    if (targetBot) {
-      targetBot.chat(data.text);
-      sendToBotConsole(data.botName, `Konsoldan Gönderilen: ${data.text}`, 'system');
-    } else {
-      sendToBotConsole(data.botName, `Bot şu an bağlı olmadığından komut gönderilemedi!`, 'system');
+// Reverse proxy: Render exposes only the PORT assigned to this web service.
+botConfigs.forEach((cfg, index) => {
+  const viewerPort = 3100 + index;
+  const proxy = createProxyMiddleware({
+    target: `http://127.0.0.1:${viewerPort}`,
+    changeOrigin: true,
+    ws: true,
+    pathRewrite: path => path.replace(new RegExp(`^/view/${cfg.username}`), ''),
+    on: {
+      error: (_err, _req, res) => {
+        if (res && typeof res.writeHead === 'function' && !res.headersSent) {
+          res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8' });
+          res.end('Bu botun görüntüsü henüz hazır değil. Botun sunucuya bağlanmasını bekle.');
+        }
+      }
     }
   });
+  app.use(`/view/${cfg.username}`, proxy);
+  viewerProxies.push(proxy);
+});
+
+// Login is handled by Socket.IO so the panel itself never contains a secret.
+io.use((socket, next) => {
+  const supplied = socket.handshake.auth && socket.handshake.auth.password;
+  if (supplied && supplied === PANEL_PASSWORD) return next();
+  next(new Error('Panel şifresi yanlış.'));
+});
+
+io.on('connection', socket => {
+  socket.emit('bot-list', botConfigs.map(c => {
+    const state = sessions.get(c.username);
+    return { username: c.username, connected: !!(state && state.connected) };
+  }));
+
+  socket.on('select-bot', username => {
+    if (!safeName(username)) return;
+    for (const cfg of botConfigs) socket.leave(`bot:${cfg.username}`);
+    socket.join(`bot:${username}`);
+    const state = sessions.get(username);
+    socket.emit('bot-status', { username, connected: !!(state && state.connected) });
+  });
+
+  socket.on('command', payload => {
+    if (!payload || !safeName(payload.botName) || typeof payload.text !== 'string') return;
+    const text = payload.text.trim();
+    if (!text || text.length > 256 || /[\r\n]/.test(text)) return;
+    const state = sessions.get(payload.botName);
+    if (!state || !state.bot || !state.connected) {
+      socket.emit('notice', 'Bot bağlı değil; komut gönderilemedi.');
+      return;
+    }
+    state.bot.chat(text);
+    logBot(payload.botName, `Panelden gönderildi: ${text}`);
+  });
+
+  socket.on('move', payload => {
+    if (!payload || !safeName(payload.botName) || !payload.controls || typeof payload.controls !== 'object') return;
+    const state = sessions.get(payload.botName);
+    if (!state || !state.bot || !state.connected) return;
+    const allowed = ['forward', 'back', 'left', 'right', 'jump', 'sprint', 'sneak'];
+    for (const key of allowed) {
+      state.bot.setControlState(key, payload.controls[key] === true);
+    }
+  });
+
+  socket.on('look', payload => {
+    if (!payload || !safeName(payload.botName)) return;
+    const state = sessions.get(payload.botName);
+    if (!state || !state.bot || !state.connected) return;
+    const yaw = Number(payload.yaw);
+    const pitch = Number(payload.pitch);
+    if (!Number.isFinite(yaw) || !Number.isFinite(pitch)) return;
+    const safePitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, pitch));
+    state.bot.look(yaw, safePitch, true).catch(() => {});
+  });
+
+  socket.on('disconnect', () => {});
+});
+
+server.on('upgrade', (req, socket, head) => {
+  // Route each viewer WebSocket upgrade only to its matching bot viewer.
+  const match = req.url && req.url.match(/^\/view\/([A-Za-z0-9_]{3,16})(?:\/|$)/);
+  if (!match) return;
+  const index = botConfigs.findIndex(c => c.username === match[1]);
+  if (index < 0) return;
+  const proxy = viewerProxies[index];
+  try { if (proxy && proxy.upgrade) proxy.upgrade(req, socket, head); }
+  catch { try { socket.destroy(); } catch {} }
+});
+
+process.on('SIGTERM', () => {
+  console.log('SIGTERM alındı; botlar kapatılıyor...');
+  for (const state of sessions.values()) {
+    clearControls(state.bot);
+    try { state.bot.quit('Server kapanıyor'); } catch {}
+  }
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 5000).unref();
+});
+
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`Web paneli PORT ${PORT} üzerinde hazır.`);
+  botConfigs.forEach((cfg, index) => startBot(cfg, index * 5000));
 });

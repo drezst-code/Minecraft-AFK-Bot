@@ -1,112 +1,50 @@
-<!-- Last updated: 2025-08-21T17:25:27Z -->
-# 🤖 Minecraft AFK Bot (Mineflayer-Based)
+# Minecraft-AFK-Bot — Render web kontrol paneli
 
-This is a lightweight Minecraft Java AFK Bot powered by [Mineflayer](https://github.com/PrismarineJS/mineflayer). It connects to a Java server, performs basic movements to avoid AFK detection, and can be customized via a simple configuration file.
+## Neler var?
+- Beş Mineflayer botu için ayrı seçim ve ayrı canlı konsol odası
+- Tarayıcıdan chat/komut gönderme
+- WASD, zıplama, koşma ve eğilme kontrolleri
+- Fare hareketiyle botun bakış yönünü değiştirme (görüntü alanında sağ fare tuşunu basılı tutarak sürükle)
+- Prismarine Viewer üzerinden tarayıcıda dünya görüntüsü
+- Panel için şifreli Socket.IO bağlantısı
 
-<p>
-  <a href="https://discord.gg/SjQydGvs5p" target="_blank">
-    <img src="https://img.shields.io/badge/Discord-Join-7289DA?logo=discord&logoColor=white" alt="Discord" width="300" />
-  </a>
-</p>
-<p>
+## Önemli görüntüleme notu
+`prismarine-viewer` içinde `firstPerson: false`, klasik omuz üstü üçüncü şahıs kamerasından ziyade kuşbakışı/dışarıdan dünya görünümüdür. Bu paket, Minecraft istemcisinin tam üçüncü şahıs kamerasını birebir taklit etmez. Fareyle bakış kontrolü botun `look()` yönünü değiştirir.
 
-# ⭐ Star this project, fork and use!
+## GitHub'a yüklemeden önce
+1. Daha önce kaynak kodda paylaştığın Minecraft giriş şifrelerini değiştir.
+2. `config` veya `.env` içinde gerçek şifre tutma.
+3. `PANEL_PASSWORD` ve `BOT_CONFIGS_JSON` değerlerini Render > Environment bölümünde tanımla.
+4. Repo içindeki eski `bot.js` ve `package.json` dosyalarını bu pakettekilerle değiştir; `public/index.html` dosyasını da ekle.
 
-## ⚠️ Warning Before You Begin
+## Render ayarları
+- Service type: Web Service
+- Build Command: `npm install`
+- Start Command: `npm start`
+- Node: 20 veya üstü
+- Render `PORT` değişkenini otomatik sağlar; uygulama `0.0.0.0` üzerinde dinler.
+- Ücretsiz Render web servisleri hareketsiz kalınca uykuya geçebilir; bu yüzden ücretsiz planda 7/24 bot bağlantısı garanti değildir.
 
-- Before starting the bot, please make sure that the Offline Mode (Pirated/Not Original) option in the settings section of your Aternos server is active.
+## Environment Variables
+`PANEL_PASSWORD` = uzun, tahmin edilmesi zor panel parolası.
 
-- Secure the bot to protect it from monsters in the game.
-
----
-
-## ✨ Features
-
-* Connect to Minecraft Java servers (IP + port)
-* Customize bot username
-* Control chunk loading and memory usage
-* Periodic chunk pruning to reduce resource usage
-* Auto-movement behavior: step forward/backward, jump, sneak, loop
-* Easy configuration via `config.json`
-
----
-
-## ⚡ Installation
-
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/nuekkis/Minecraft-AFK-Bot.git
-cd Minecraft-AFK-Bot
+`BOT_CONFIGS_JSON` = tek satırlık JSON dizisi, tam beş bot:
+```json
+[{"username":"BotAdi1","password":"SunucuSifresi1"},{"username":"BotAdi2","password":"SunucuSifresi2"},{"username":"BotAdi3","password":"SunucuSifresi3"},{"username":"BotAdi4","password":"SunucuSifresi4"},{"username":"BotAdi5","password":"SunucuSifresi5"}]
 ```
 
-### 2. Install dependencies
+Ayrıca `MC_HOST`, `MC_PORT`, `MC_VERSION` değişkenlerini istersen değiştir.
 
+## Test
+Yerelde:
 ```bash
 npm install
 ```
-
-### 3. Configure `config.json`
-
-```json
-{
-  "serverHost": "yourserver.aternos.me",
-  "serverPort": 25565,
-  "botUsername": "MyBotName",
-  "botChunk": 4
-}
-```
-
-> ⚠️ Make sure the server is in offline mode if you're not using premium accounts.
-
----
-
-## 🤖 Starting the Bot
-
+`PANEL_PASSWORD` ve `BOT_CONFIGS_JSON` ortam değişkenlerini ayarla, sonra:
 ```bash
-node bot.js
+npm start
 ```
+Tarayıcıda `http://localhost:10000` aç.
 
-On successful connection:
-
-* You'll see `✅ BotName is Ready!` in the console
-* After 5 seconds, all loaded chunks are cleared
-* Every 20 seconds, any chunks beyond a 6-chunk radius will be removed
-
----
-
-## ⚙️ Configuration Options (`config.json`)
-
-| Key            | Description                                |
-| -------------- | ------------------------------------------ |
-| `serverHost`         | IP or domain of your Minecraft server      |
-| `serverPort`         | Server port (default is 25565)             |
-| `botUsername`     | The bot's visible name in-game             |
-| `botChunk` | Radius of loaded chunks (recommended: 1–6) |
-
----
-
-## ⚠️ Notes
-
-* **Skins**: Skins might not appear properly if the server is in offline mode.
-* **Sneak Movement**: The bot uses `setControlState('sneak', true)`, but some servers may block or ignore this action.
-* **AFK Prevention**: The bot periodically moves, sneaks, and jumps to prevent disconnection due to inactivity.
-
----
-
-## 📚 Resources & Contributions
-
-* [Mineflayer Docs](https://mineflayer.prismarine.js.org/)
-* [PrismarineJS GitHub](https://github.com/PrismarineJS/)
-
-Feel free to contribute by opening a pull request or submitting an issue.
-
----
-
-## 📄 License
-
-This project is licensed under the MIT License.
-
----
-
-Get started now and keep your server active with a smart, customizable bot! ⛏️
+## Dikkat
+Bu bir başlangıç uygulamasıdır; Render'a deploy etmeden önce test et. Viewer proxy/WebSocket yönlendirmesi, Render üzerinde ve kullandığın `prismarine-viewer` sürümünde doğrulanmalıdır. Botların bağlandığı Minecraft sunucusunun botlara izin vermesi gerekir.

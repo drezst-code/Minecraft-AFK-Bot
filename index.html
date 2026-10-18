@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Minecraft Bot Kontrol</title>
+<style>
+:root{color-scheme:dark;--bg:#10141b;--panel:#1b2330;--line:#344154;--green:#4ade80;--text:#edf2f7;--muted:#aab6c5}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px system-ui,Segoe UI,sans-serif}
+header{padding:18px 22px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+h1{font-size:21px;margin:0}main{max-width:1300px;margin:auto;padding:18px;display:grid;grid-template-columns:minmax(0,1.7fr) minmax(300px,1fr);gap:16px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;min-width:0}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+select,input,button{font:inherit;border-radius:8px;border:1px solid var(--line);background:#111823;color:var(--text);padding:10px}
+button{cursor:pointer}button:hover{border-color:var(--green)}button.primary{background:#166534;border-color:#22c55e}button:disabled{opacity:.45;cursor:not-allowed}
+#viewer{width:100%;height:480px;background:#080b10;border:1px solid var(--line);border-radius:8px;margin-top:12px}
+#viewer iframe{width:100%;height:100%;border:0;border-radius:8px}
+small,.muted{color:var(--muted)}#status{margin-left:auto}.dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#f87171;margin-right:6px} .dot.on{background:var(--green)}
+#console{height:250px;overflow:auto;background:#080b10;border:1px solid var(--line);padding:10px;border-radius:8px;font:12px ui-monospace,monospace;white-space:pre-wrap}
+.chat{color:#fff}.error{color:#fca5a5}.system{color:#7dd3fc}
+#cmd{flex:1;min-width:100px}.controls{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;max-width:300px;margin:12px auto}
+.controls button{min-height:44px;user-select:none;touch-action:none}.controls .empty{visibility:hidden}
+.note{line-height:1.5;color:var(--muted);font-size:13px}
+@media(max-width:850px){main{grid-template-columns:1fr}#viewer{height:380px}}
+</style>
+</head>
+<body>
+<header><h1>🤖 Minecraft Bot Kontrol Merkezi</h1><span id="status" class="muted">Bağlantı bekleniyor</span></header>
+<main>
+<section class="panel">
+  <div class="row">
+    <label for="bot">Kontrol edilecek bot:</label>
+    <select id="bot"></select>
+    <button id="reopen" type="button">Görüntüyü yenile</button>
+  </div>
+  <div id="viewer"><div style="padding:18px;color:#aab6c5">Görüntü yükleniyor. Botun dünyaya bağlanmasını bekle.</div></div>
+  <p class="note">Görüntüleyici, botun çevresini tarayıcıda gösterir. Fareyle dünyayı çevirmek bu görüntüleyicinin kamera kontrolüdür; fare hareketi ayrıca karakterin baktığı yönü günceller.</p>
+  <h3>Hareket kontrolleri</h3>
+  <div class="controls" id="controls">
+    <button class="empty" tabindex="-1"> </button><button data-key="forward">W ▲</button><button class="empty" tabindex="-1"> </button>
+    <button data-key="left">A ◀</button><button data-key="back">S ▼</button><button data-key="right">D ▶</button>
+    <button data-key="sneak">Shift</button><button data-key="jump">Space / Zıpla</button><button data-key="sprint">Ctrl / Koş</button>
+  </div>
+  <p class="note">Klavye: W/A/S/D, Space, Shift ve Ctrl. Hareket tuşlarını basılı tut. Kontrol paneli odaktayken tarayıcının sayfayı kaydırmasını önlemek için Space düğmesini de kullanabilirsin.</p>
+</section>
+<section class="panel">
+  <h3>Canlı konsol</h3>
+  <div id="console" aria-live="polite"></div>
+  <form id="commandForm" class="row" style="margin-top:10px">
+    <input id="cmd" maxlength="256" autocomplete="off" placeholder="Sohbet veya komut yaz...">
+    <button class="primary" type="submit">Gönder</button>
+  </form>
+  <p id="notice" class="note"></p>
+  <hr style="border-color:#344154;margin:18px 0">
+  <h3>Panel girişi</h3>
+  <div class="row"><input id="password" type="password" autocomplete="current-password" placeholder="Panel şifresi"><button id="connect" class="primary">Bağlan</button></div>
+  <p class="note">Panel şifresi Render Environment Variables içindeki PANEL_PASSWORD değeridir. Şifreyi koda veya GitHub'a yazma.</p>
+</section>
+</main>
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+let socket = null, selected = '', connected = false;
+const controls = {forward:false,back:false,left:false,right:false,jump:false,sprint:false,sneak:false};
+let yaw = 0, pitch = 0, lookActive = false, lastX = 0, lastY = 0;
+function say(text,type='system'){
+  const d=document.createElement('div');d.className=type;d.textContent=text;$('console').appendChild(d);
+  $('console').scrollTop=$('console').scrollHeight;
+}
+function status(text,on=false){$('status').innerHTML='<span class="dot '+(on?'on':'')+'"></span>'+text;}
+function resetControls(){for(const k in controls)controls[k]=false;sendMove();}
+function sendMove(){if(socket&&connected&&selected)socket.emit('move',{botName:selected,controls:{...controls}});}
+function chooseBot(name){
+  selected=name;$('console').innerHTML='';$('bot').value=name;
+  if(socket&&connected)socket.emit('select-bot',name);
+  $('viewer').innerHTML='';
+  const frame=document.createElement('iframe');
+  frame.title=name+' Minecraft görüntüsü';
+  frame.src='/view/'+encodeURIComponent(name)+'/';
+  frame.allow='fullscreen';
+  $('viewer').appendChild(frame);
+  say('Seçili bot: '+name);
+  resetControls();
+}
+function connect(){
+  const pass=$('password').value;
+  if(!pass){$('notice').textContent='Panel şifresini gir.';return;}
+  if(socket)socket.disconnect();
+  socket=io({auth:{password:pass},transports:['websocket','polling']});
+  socket.on('connect',()=>{connected=true;status('Panel bağlı',true);$('notice').textContent='';});
+  socket.on('connect_error',err=>{connected=false;status('Giriş başarısız');$('notice').textContent='Bağlantı/giriş hatası: '+err.message;});
+  socket.on('disconnect',()=>{connected=false;status('Bağlantı kesildi');resetControls();});
+  socket.on('bot-list',list=>{
+    $('bot').innerHTML='';
+    list.forEach(b=>{const o=document.createElement('option');o.value=b.username;o.textContent=b.username+(b.connected?' — bağlı':' — bağlanıyor');$('bot').appendChild(o);});
+    if(!selected&&list.length)selected=list[0].username;
+    if(selected)chooseBot(selected);
+  });
+  socket.on('log',entry=>say(entry.text,entry.type));
+  socket.on('notice',msg=>$('notice').textContent=msg);
+  socket.on('bot-status',s=>status(s.username+(s.connected?' — bağlı':' — bağlantı bekleniyor'),s.connected));
+}
+$('connect').addEventListener('click',connect);
+$('password').addEventListener('keydown',e=>{if(e.key==='Enter')connect();});
+$('bot').addEventListener('change',()=>chooseBot($('bot').value));
+$('reopen').addEventListener('click',()=>{if(selected)chooseBot(selected);});
+$('commandForm').addEventListener('submit',e=>{
+  e.preventDefault();const text=$('cmd').value.trim();
+  if(!text||!socket||!connected||!selected)return;
+  socket.emit('command',{botName:selected,text});$('cmd').value='';
+});
+document.querySelectorAll('[data-key]').forEach(btn=>{
+  const key=btn.dataset.key;
+  const down=e=>{e.preventDefault();if(!connected)return;controls[key]=true;sendMove();};
+  const up=e=>{e.preventDefault();controls[key]=false;sendMove();};
+  btn.addEventListener('pointerdown',down);btn.addEventListener('pointerup',up);
+  btn.addEventListener('pointerleave',up);btn.addEventListener('pointercancel',up);
+});
+window.addEventListener('keydown',e=>{
+  if(['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName))return;
+  const map={w:'forward',s:'back',a:'left',d:'right',' ':'jump',Shift:'sneak',Control:'sprint'};
+  const key=map[e.key]||map[e.key.toLowerCase()];
+  if(key){e.preventDefault();if(!controls[key]){controls[key]=true;sendMove();}}
+});
+window.addEventListener('keyup',e=>{
+  const map={w:'forward',s:'back',a:'left',d:'right',' ':'jump',Shift:'sneak',Control:'sprint'};
+  const key=map[e.key]||map[e.key.toLowerCase()];
+  if(key){controls[key]=false;sendMove();}
+});
+window.addEventListener('blur',resetControls);
+
+// Mouse movement while holding the right mouse button turns the bot's head/body.
+$('viewer').addEventListener('contextmenu',e=>e.preventDefault());
+$('viewer').addEventListener('pointerdown',e=>{
+  if(e.button!==2)return;lookActive=true;lastX=e.clientX;lastY=e.clientY;
+  $('viewer').setPointerCapture?.(e.pointerId);
+});
+window.addEventListener('pointerup',()=>lookActive=false);
+window.addEventListener('pointermove',e=>{
+  if(!lookActive||!socket||!connected||!selected)return;
+  const dx=e.clientX-lastX,dy=e.clientY-lastY;lastX=e.clientX;lastY=e.clientY;
+  yaw-=dx*0.006;pitch-=dy*0.006;pitch=Math.max(-1.5,Math.min(1.5,pitch));
+  socket.emit('look',{botName:selected,yaw,pitch});
+});
+status('Panel şifresiyle giriş yap');
+</script>
+</body>
+</html>

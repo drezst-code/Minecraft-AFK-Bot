@@ -63,14 +63,14 @@ function requirePassword(req, res, next) {
 
 app.get('/healthz', (_req, res) => res.status(200).send('ok'));
 
-// Statik dosyalar + ana sayfa
-app.use(express.static(path.join(__dirname, 'public')));
+// DÜZELTME: Dosyalar public klasörü yerine doğrudan ana klasörden (root) okunuyor
+app.use(express.static(__dirname));
 app.get('/', (_req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  res.sendFile(path.join(__dirname, 'index.html'));
 });
 app.get('/bot/:username', (req, res) => {
   if (!validBot(req.params.username)) return res.status(404).send('Bot bulunamadı');
-  res.sendFile(path.join(__dirname, 'public', 'bot.html'));
+  res.sendFile(path.join(__dirname, 'bot.html'));
 });
 
 app.get('/api/bots', requirePassword, (_req, res) => {
@@ -155,7 +155,7 @@ io.on('connection', socket => {
 server.on('upgrade', (req, socket, head) => {
   const m = req.url?.match(/^\/view\/([A-Za-z0-9_]{3,16})/);
   if (!m) return;
-  const username = m[1];
+  const username = m;
   if (!validBot(username)) return socket.destroy();
   const url = new URL(req.url, 'http://x');
   if (url.searchParams.get('panelPassword') !== PANEL_PASSWORD) return socket.destroy();

@@ -1,5 +1,7 @@
+
 require('dotenv').config();
 
+const path = require('path');
 const mineflayer = require('mineflayer');
 const express = require('express');
 const http = require('http');
@@ -9,68 +11,103 @@ const { createProxyMiddleware } = require('http-proxy-middleware');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: false } });
+const io = new Server(server, {
+  cors: { origin: false }
+});
 
 const PORT = Number(process.env.PORT || 10000);
 const HOST = process.env.MC_HOST || 'maven.play.hosting';
 const MC_PORT = Number(process.env.MC_PORT || 25565);
 const MC_VERSION = process.env.MC_VERSION || '1.21.1';
-const PANEL_PASSWORD = process.env.PANEL_PASSWORD;
+const PANEL_PASSWORD = process.env.PANEL_PASSWORD || '';
 
-if (!PANEL_PASSWORD || PANEL_PASSWORD.length < 6) {
-  console.error('PANEL_PASSWORD ortam değişkenini en az 6 karakter olarak ayarla.');
+if (PANEL_PASSWORD.length < 6) {
+  console.error('HATA: Render Environment bölümünde PANEL_PASSWORD ayarla (en az 6 karakter).');
   process.exit(1);
 }
 
 let botConfigs;
+
 try {
   botConfigs = JSON.parse(process.env.BOT_CONFIGS_JSON || '[]');
 } catch {
-  console.error('BOT_CONFIGS_JSON geçerli JSON değil.');
+  console.error('HATA: BOT_CONFIGS_JSON geçerli JSON değil.');
   process.exit(1);
 }
+
 if (!Array.isArray(botConfigs) || botConfigs.length !== 5) {
-  console.error('BOT_CONFIGS_JSON içinde tam olarak 5 bot tanımlamalısın.');
+  console.error('HATA: BOT_CONFIGS_JSON içinde tam olarak 5 bot olmalı.');
   process.exit(1);
 }
+
 for (const cfg of botConfigs) {
-  if (!cfg.username || !cfg.password || !/^[A-Za-z0-9_]{3,16}$/.test(cfg.username)) {
-    console.error('Her botta geçerli username ve password olmalı.');
+  if (
+    typeof cfg.username !== 'string' ||
+    !/^[A-Za-z0-9_]{3,16}$/.test(cfg.username) ||
+    typeof cfg.password !== 'string' ||
+    !cfg.password.length
+  ) {
+    console.error('HATA: Her bot için geçerli username ve password gerekli.');
     process.exit(1);
   }
 }
 
-app.use(express.static('public', { index: false }));
+if (new Set(botConfigs.map(c => c.username.toLowerCase())).size !== 5) {
+  console.error('HATA: Bot kullanıcı adları birbirinden farklı olmalı.');
+  process.exit(1);
+}
 
-// Simple password gate for the control panel and all Socket.IO actions.
-app.get('/', (req, res) => res.sendFile(require('path').join(__dirname, 'public', 'index.html')));
-app.get('/healthz', (_req, res) => res.status(200).send('ok'));
+app.use(express.static(path.join(__dirname, 'public'), { index: false }));
+
+app.get('/', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+app.get('/healthz', (_req, res) => {
+  res.status(200).send('ok');
+});
 
 const sessions = new Map();
 const viewerProxies = [];
 
 function safeName(name) {
-  return botConfigs.some(c => c.username === name);
+  return typeof name === 'string' &&
+    botConfigs.some(c => c.username === name);
 }
 
-function logBot(username, text, type = 'system') {
-  const entry = { text: `[${new Date().toLocaleTimeString()}] ${text}`, type };
-  console.log(`[${username}] ${text}`);
+function logBot(username, message, type = 'system') {
+  const entry = {
+    text: `[${new Date().toLocaleTimeString()}] ${message}`,
+    type
+  };
+
+  console.log(`[${username}] ${message}`);
   io.to(`bot:${username}`).emit('log', entry);
 }
 
 function clearControls(bot) {
   if (!bot) return;
-  for (const key of ['forward', 'back', 'left', 'right', 'jump', 'sprint', 'sneak']) {
-    try { bot.setControlState(key, false); } catch {}
+
+  for (const key of [
+    'forward', 'back', 'left', 'right',
+    'jump', 'sprint', 'sneak'
+  ]) {
+    try {
+      bot.setControlState(key, false);
+    } catch {}
   }
 }
 
 function startBot(cfg, delay = 0) {
   setTimeout(() => {
-    if (sessions.has(cfg.username) && sessions.get(cfg.username).bot) return;
-    logBot(cfg.username, `Minecraft sunucusuna bağlanılıyor (${MC_VERSION})...`);
+    const existing = sessions.get(cfg.username);
+
+    if (existing && existing.bot) return;
+
+    logBot(cfg.username, `Sunucuya bağlanılıyor: ${HOST}:${MC_PORT}`);
+
     let bot;
+
     try {
       bot = mineflayer.createBot({
         host: HOST,
@@ -82,163 +119,304 @@ function startBot(cfg, delay = 0) {
       });
     } catch (err) {
       logBot(cfg.username, `Bot başlatılamadı: ${err.message}`, 'error');
+      scheduleReconnect(cfg);
       return;
     }
 
-    const state = { bot, connected: false, viewerStarted: false, reconnectTimer: null };
+    const state = {
+      bot,
+      connected: false,
+      viewerStarted: false,
+      reconnectTimer: null
+    };
+
     sessions.set(cfg.username, state);
 
     bot.once('spawn', () => {
       state.connected = true;
-      logBot(cfg.username, 'Sunucuya bağlandı ve dünyada doğdu.');
+      logBot(cfg.username, 'Bot sunucuya bağlandı.');
+
       setTimeout(() => {
-        if (bot.player) {
+        if (
+          sessions.get(cfg.username) === state &&
+          bot.player
+        ) {
           bot.chat(`/login ${cfg.password}`);
-          logBot(cfg.username, 'Giriş komutu gönderildi.');
+          logBot(cfg.username, 'Sunucu giriş komutu gönderildi.');
         }
       }, 2500);
 
-      // Each viewer has an internal port; Express proxies it through the single Render public port.
       if (!state.viewerStarted) {
-        state.viewerStarted = true;
-        const viewerPort = 3100 + botConfigs.findIndex(c => c.username === cfg.username);
+        const index = botConfigs.findIndex(
+          c => c.username === cfg.username
+        );
+
         try {
           mineflayerViewer(bot, {
-            port: viewerPort,
+            port: 3100 + index,
             firstPerson: false,
             viewDistance: 5
           });
-          logBot(cfg.username, `Dünya görüntüsü hazır (viewer port ${viewerPort}).`);
+
+          state.viewerStarted = true;
+          logBot(cfg.username, 'Dünya görüntüsü başlatıldı.');
         } catch (err) {
-          logBot(cfg.username, `Görüntüleyici başlatılamadı: ${err.message}`, 'error');
+          logBot(
+            cfg.username,
+            `Görüntü başlatılamadı: ${err.message}`,
+            'error'
+          );
         }
       }
     });
 
     bot.on('chat', (sender, message) => {
-      if (sender !== cfg.username) logBot(cfg.username, `<${sender}> ${message}`, 'chat');
+      if (sender !== cfg.username) {
+        logBot(cfg.username, `<${sender}> ${message}`, 'chat');
+      }
     });
 
-    bot.on('message', (jsonMsg) => {
-      const text = jsonMsg.toString();
-      if (text && !text.includes(cfg.username)) logBot(cfg.username, text, 'chat');
+    bot.on('message', jsonMsg => {
+      const message = jsonMsg.toString();
+
+      if (message) {
+        logBot(cfg.username, message, 'chat');
+      }
     });
 
-    bot.on('kicked', reason => logBot(cfg.username, `Sunucudan atıldı: ${String(reason)}`, 'error'));
-    bot.on('error', err => logBot(cfg.username, `Bağlantı hatası: ${err.message}`, 'error'));
+    bot.on('kicked', reason => {
+      logBot(cfg.username, `Sunucudan atıldı: ${String(reason)}`, 'error');
+    });
+
+    bot.on('error', err => {
+      logBot(cfg.username, `Bağlantı hatası: ${err.message}`, 'error');
+    });
 
     bot.on('end', reason => {
       state.connected = false;
       clearControls(bot);
-      logBot(cfg.username, `Bağlantı kesildi: ${String(reason || 'bilinmeyen neden')}. 20 saniye sonra yeniden denenecek.`);
-      if (sessions.get(cfg.username) === state) sessions.delete(cfg.username);
-      if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
-      state.reconnectTimer = setTimeout(() => startBot(cfg, 0), 20000);
+
+      logBot(
+        cfg.username,
+        `Bağlantı kesildi: ${String(reason || 'bilinmeyen neden')}`,
+        'error'
+      );
+
+      if (sessions.get(cfg.username) === state) {
+        sessions.delete(cfg.username);
+        scheduleReconnect(cfg);
+      }
     });
   }, delay);
 }
 
-// Reverse proxy: Render exposes only the PORT assigned to this web service.
+function scheduleReconnect(cfg) {
+  const existing = sessions.get(cfg.username);
+
+  if (existing && existing.reconnectTimer) return;
+
+  const timer = setTimeout(() => {
+    const current = sessions.get(cfg.username);
+
+    if (!current || !current.bot) {
+      startBot(cfg);
+    }
+  }, 20000);
+
+  if (existing) {
+    existing.reconnectTimer = timer;
+  } else {
+    sessions.set(cfg.username, {
+      bot: null,
+      connected: false,
+      viewerStarted: false,
+      reconnectTimer: timer
+    });
+  }
+}
+
+// Her botun görüntüsünü kendi dahili portuna yönlendir.
 botConfigs.forEach((cfg, index) => {
   const viewerPort = 3100 + index;
+
   const proxy = createProxyMiddleware({
     target: `http://127.0.0.1:${viewerPort}`,
     changeOrigin: true,
     ws: true,
-    pathRewrite: path => path.replace(new RegExp(`^/view/${cfg.username}`), ''),
+    pathRewrite: path =>
+      path.replace(new RegExp(`^/view/${cfg.username}`), ''),
     on: {
       error: (_err, _req, res) => {
         if (res && typeof res.writeHead === 'function' && !res.headersSent) {
-          res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8' });
-          res.end('Bu botun görüntüsü henüz hazır değil. Botun sunucuya bağlanmasını bekle.');
+          res.writeHead(503, {
+            'Content-Type': 'text/plain; charset=utf-8'
+          });
+          res.end('Bot görüntüsü henüz hazır değil.');
         }
       }
     }
   });
+
   app.use(`/view/${cfg.username}`, proxy);
   viewerProxies.push(proxy);
 });
 
-// Login is handled by Socket.IO so the panel itself never contains a secret.
+// Panel giriş kontrolü.
 io.use((socket, next) => {
-  const supplied = socket.handshake.auth && socket.handshake.auth.password;
-  if (supplied && supplied === PANEL_PASSWORD) return next();
+  const supplied = socket.handshake.auth?.password;
+
+  if (
+    typeof supplied === 'string' &&
+    supplied === PANEL_PASSWORD
+  ) {
+    return next();
+  }
+
   next(new Error('Panel şifresi yanlış.'));
 });
 
 io.on('connection', socket => {
-  socket.emit('bot-list', botConfigs.map(c => {
-    const state = sessions.get(c.username);
-    return { username: c.username, connected: !!(state && state.connected) };
+  socket.emit('bot-list', botConfigs.map(cfg => {
+    const state = sessions.get(cfg.username);
+
+    return {
+      username: cfg.username,
+      connected: !!(state && state.connected)
+    };
   }));
 
   socket.on('select-bot', username => {
     if (!safeName(username)) return;
-    for (const cfg of botConfigs) socket.leave(`bot:${cfg.username}`);
+
+    for (const cfg of botConfigs) {
+      socket.leave(`bot:${cfg.username}`);
+    }
+
     socket.join(`bot:${username}`);
+
     const state = sessions.get(username);
-    socket.emit('bot-status', { username, connected: !!(state && state.connected) });
+
+    socket.emit('bot-status', {
+      username,
+      connected: !!(state && state.connected)
+    });
   });
 
   socket.on('command', payload => {
-    if (!payload || !safeName(payload.botName) || typeof payload.text !== 'string') return;
-    const text = payload.text.trim();
-    if (!text || text.length > 256 || /[\r\n]/.test(text)) return;
+    if (
+      !payload ||
+      !safeName(payload.botName) ||
+      typeof payload.text !== 'string'
+    ) return;
+
+    const command = payload.text.trim();
+
+    if (
+      !command ||
+      command.length > 256 ||
+      /[\r\n]/.test(command)
+    ) return;
+
     const state = sessions.get(payload.botName);
-    if (!state || !state.bot || !state.connected) {
-      socket.emit('notice', 'Bot bağlı değil; komut gönderilemedi.');
+
+    if (!state?.bot || !state.connected) {
+      socket.emit('notice', 'Bot bağlı değil.');
       return;
     }
-    state.bot.chat(text);
-    logBot(payload.botName, `Panelden gönderildi: ${text}`);
+
+    state.bot.chat(command);
+    logBot(payload.botName, 'Panelden komut gönderildi.');
   });
 
   socket.on('move', payload => {
-    if (!payload || !safeName(payload.botName) || !payload.controls || typeof payload.controls !== 'object') return;
+    if (
+      !payload ||
+      !safeName(payload.botName) ||
+      !payload.controls ||
+      typeof payload.controls !== 'object'
+    ) return;
+
     const state = sessions.get(payload.botName);
-    if (!state || !state.bot || !state.connected) return;
-    const allowed = ['forward', 'back', 'left', 'right', 'jump', 'sprint', 'sneak'];
+
+    if (!state?.bot || !state.connected) return;
+
+    const allowed = [
+      'forward', 'back', 'left', 'right',
+      'jump', 'sprint', 'sneak'
+    ];
+
     for (const key of allowed) {
-      state.bot.setControlState(key, payload.controls[key] === true);
+      state.bot.setControlState(
+        key,
+        payload.controls[key] === true
+      );
     }
   });
 
   socket.on('look', payload => {
     if (!payload || !safeName(payload.botName)) return;
+
     const state = sessions.get(payload.botName);
-    if (!state || !state.bot || !state.connected) return;
+
+    if (!state?.bot || !state.connected) return;
+
     const yaw = Number(payload.yaw);
     const pitch = Number(payload.pitch);
+
     if (!Number.isFinite(yaw) || !Number.isFinite(pitch)) return;
-    const safePitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, pitch));
+
+    const safePitch = Math.max(
+      -Math.PI / 2,
+      Math.min(Math.PI / 2, pitch)
+    );
+
     state.bot.look(yaw, safePitch, true).catch(() => {});
   });
-
-  socket.on('disconnect', () => {});
 });
 
 server.on('upgrade', (req, socket, head) => {
-  // Route each viewer WebSocket upgrade only to its matching bot viewer.
-  const match = req.url && req.url.match(/^\/view\/([A-Za-z0-9_]{3,16})(?:\/|$)/);
+  const match = req.url?.match(
+    /^\/view\/([A-Za-z0-9_]{3,16})(?:\/|$)/
+  );
+
   if (!match) return;
-  const index = botConfigs.findIndex(c => c.username === match[1]);
+
+  const index = botConfigs.findIndex(
+    cfg => cfg.username === match[1]
+  );
+
   if (index < 0) return;
-  const proxy = viewerProxies[index];
-  try { if (proxy && proxy.upgrade) proxy.upgrade(req, socket, head); }
-  catch { try { socket.destroy(); } catch {} }
+
+  try {
+    viewerProxies[index]?.upgrade(req, socket, head);
+  } catch {
+    socket.destroy();
+  }
 });
 
-process.on('SIGTERM', () => {
-  console.log('SIGTERM alındı; botlar kapatılıyor...');
+function shutdown() {
+  console.log('Sunucu kapanıyor...');
+
   for (const state of sessions.values()) {
+    if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
     clearControls(state.bot);
-    try { state.bot.quit('Server kapanıyor'); } catch {}
+
+    try {
+      state.bot?.quit('Sunucu kapanıyor');
+    } catch {}
   }
+
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 5000).unref();
-});
+}
+
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Web paneli PORT ${PORT} üzerinde hazır.`);
-  botConfigs.forEach((cfg, index) => startBot(cfg, index * 5000));
+  console.log(`Web paneli ${PORT} portunda hazır.`);
+
+  botConfigs.forEach((cfg, index) => {
+    startBot(cfg, index * 5000);
+  });
 });

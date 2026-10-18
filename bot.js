@@ -11,7 +11,7 @@ const MC_VERSION = process.env.MC_VERSION || '1.21.1';
 // 'just-jump' : Durduğu yerde zıplar ve sürekli önünü kazar / vurur (Rastgele tıklamaz!)
 // 'freeze'    : Tamamen hareketsiz durur, kick yememek için 10 dakikada sadece 1 kez zıplar
 const AKTIF_MOD = 'just-jump'; 
-const VURMA_SANIYESI = 1; // 'just-jump' modundayken kaç saniyede bir vuracağını seçin
+const VURMA_SANIYESI = 1; 
 
 let BOT_CONFIGS = [];
 try {
@@ -37,7 +37,6 @@ const activeBots = new Map();
 function startBotBehavior(bot) {
   const loops = [];
 
-  // MOD 1: Sadece Zıpla ve Belirttiğin Saniyede Bir Otomatik Vur
   if (AKTIF_MOD === 'just-jump') {
     bot.clearControlStates();
     
@@ -60,10 +59,7 @@ function startBotBehavior(bot) {
     }, VURMA_SANIYESI * 1000);
 
     loops.push(jumpLoop, attackLoop);
-    console.log(`[${bot.username}] 'just-jump' modu aktif edildi. Vurma süresi: ${VURMA_SANIYESI}sn.`);
   }
-
-  // MOD 2: Dondur (10 dakikada sadece 1 kere zıplar - Sıfır hasar ve lag riski)
   else if (AKTIF_MOD === 'freeze') {
     bot.clearControlStates();
     
@@ -71,14 +67,11 @@ function startBotBehavior(bot) {
       if (!bot.entity) return;
       bot.setControlState('jump', true);
       setTimeout(() => { if (bot.entity) bot.setControlState('jump', false); }, 400);
-      console.log(`[${bot.username}] Dondurma modunda anti-kick zıplaması yapıldı.`);
     }, 10 * 60 * 1000);
 
     loops.push(freezeLoop);
-    console.log(`[${bot.username}] 'freeze' dondurma modu aktif edildi. 10 dakikada bir zıplayacak.`);
   }
 
-  // Bot düşerse zamanlayıcıları temizle
   bot.once('end', () => {
     loops.forEach(l => clearInterval(l));
   });
@@ -93,6 +86,7 @@ function scheduleReconnect(cfg) {
 
 function startBot(cfg, delay = 0) {
   setTimeout(() => {
+    if (activeBots.has(cfg.username)) return;
     console.log(`[${cfg.username}] Minecraft sunucusuna bağlanıyor...`);
 
     let bot;
@@ -102,7 +96,8 @@ function startBot(cfg, delay = 0) {
         port: MC_PORT,
         username: cfg.username,
         version: MC_VERSION,
-        auth: 'offline'
+        auth: 'offline',
+        hideErrors: true // DÜZELTME: VarInt/SlotComponent tipi paket hatalarında botun çökmesini engeller
       });
     } catch (e) {
       console.error(`[${cfg.username}] Bağlantı hatası: ${e.message}`);
@@ -115,19 +110,23 @@ function startBot(cfg, delay = 0) {
     bot.once('spawn', () => {
       console.log(`[${cfg.username}] Sunucuya başarıyla giriş yaptı!`);
 
-      // Şifre Giriş Mesajı
+      // DÜZELTME: Slaş işaretinin yutulmaması için komut doğrudan sunucu paket kanalına yazdırılıyor
       setTimeout(() => {
-        bot.chat(`/login ${cfg.password}`);
-        console.log(`[${cfg.username}] Giriş komutu gönderildi.`);
-        
-        // Hareket modlarını başlat
-        startBotBehavior(bot);
-      }, 2000);
+        if (bot._client && bot._client.write) {
+          bot._client.write('chat', { message: `/login ${cfg.password}` });
+          console.log(`[${cfg.username}] Güvenli Giriş komutu (/login) paket olarak gönderildi.`);
+          startBotBehavior(bot);
+        }
+      }, 2500);
     });
 
     bot.on('message', msg => {
-      // Sunucu içi sohbet mesajlarını Render log ekranına yazdırır
       console.log(`[${cfg.username} SOHBET]: ${msg.toString()}`);
+    });
+
+    // DÜZELTME: Beklenmedik paket veya protokol hatalarında tüm projenin çökmesini önler
+    bot.on('error', err => {
+      console.error(`[${cfg.username}] Protokol/Hata Yakalandı: ${err.message}`);
     });
 
     bot.on('end', () => {
@@ -135,11 +134,8 @@ function startBot(cfg, delay = 0) {
       activeBots.delete(cfg.username);
       scheduleReconnect(cfg);
     });
-
-    bot.on('error', err => console.error(`[${cfg.username}] Hata: ${err.message}`));
   }, delay);
 }
 
-// Tüm botları sırayla başlat
 console.log('Maven Arka Plan AFK Sistemi başlatılıyor...');
 BOT_CONFIGS.forEach((cfg, i) => startBot(cfg, i * 4000));

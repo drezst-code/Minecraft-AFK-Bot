@@ -5,7 +5,6 @@ const express = require('express');
 const http = require('http');
 const path = require('path');
 const { Server } = require('socket.io');
-const { mineflayer: mineflayerViewer } = require('prismarine-viewer');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 
 // ===================== AYARLAR =====================
@@ -15,7 +14,6 @@ const MC_HOST = process.env.MC_HOST || 'maven.play.hosting';
 const MC_PORT = Number(process.env.MC_PORT || 25565);
 const MC_VERSION = process.env.MC_VERSION || '1.21.1';
 
-// BOT_CONFIGS_JSON yoksa varsayılan botlar
 let BOT_CONFIGS = [];
 try {
   if (process.env.BOT_CONFIGS_JSON) {
@@ -38,13 +36,12 @@ try {
 
 console.log(`Panel şifresi: ${PANEL_PASSWORD}`);
 
-// ===================== WEB =====================
+// ===================== WEB SERVER =====================
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
 const activeBots = new Map();
-const viewerProxies = new Map();
 
 function validBot(username) {
   return BOT_CONFIGS.find(cfg => cfg.username === username);
@@ -63,7 +60,6 @@ function requirePassword(req, res, next) {
 
 app.get('/healthz', (_req, res) => res.status(200).send('ok'));
 
-// DÜZELTME: Dosyalar public klasörü yerine doğrudan ana klasörden (root) okunuyor
 app.use(express.static(__dirname));
 app.get('/', (_req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
@@ -78,30 +74,6 @@ app.get('/api/bots', requirePassword, (_req, res) => {
     const s = activeBots.get(cfg.username);
     return { username: cfg.username, connected: !!(s && s.connected) };
   }));
-});
-
-// Viewer proxy
-BOT_CONFIGS.forEach((cfg, index) => {
-  const viewerPort = 3100 + index;
-  const proxy = createProxyMiddleware({
-    target: `http://127.0.0.1:${viewerPort}`,
-    changeOrigin: true,
-    ws: true,
-    pathRewrite: p => p.replace(new RegExp(`^/view/${cfg.username}`), '') || '/',
-    on: {
-      error: (_err, _req, res) => {
-        if (res && !res.headersSent) {
-          res.writeHead(503, { 'Content-Type': 'text/plain' });
-          res.end('3D görüntü henüz hazır değil');
-        }
-      }
-    }
-  });
-  viewerProxies.set(cfg.username, proxy);
-  app.use(`/view/${cfg.username}`, (req, res, next) => {
-    if (passwordFromRequest(req) !== PANEL_PASSWORD) return res.status(401).send('Giriş yap');
-    proxy(req, res, next);
-  });
 });
 
 // Socket.IO
@@ -150,22 +122,103 @@ io.on('connection', socket => {
     if (!Number.isFinite(yaw) || !Number.isFinite(pitch)) return;
     state.bot.look(yaw, Math.max(-Math.PI/2, Math.min(Math.PI/2, pitch)), true).catch(() => {});
   });
+
+  // Panel butonlarından gelen mod komutları
+  socket.on('set-bot-mode', data => {
+    if (!data || !validBot(data.botName)) return;
+    const state = activeBots.get(data.botName);
+    if (!state || !state.bot) return;
+
+    state.currentMode = data.mode;
+    if (data.attackSeconds) {
+      state.attackIntervalMs = Number(data.attackSeconds) * 1000;
+    }
+    updateBotBehavior(state.bot, state);
+  });
 });
 
-server.on('upgrade', (req, socket, head) => {
-  const m = req.url?.match(/^\/view\/([A-Za-z0-9_]{3,16})/);
-  if (!m) return;
-  const username = m;
-  if (!validBot(username)) return socket.destroy();
-  const url = new URL(req.url, 'http://x');
-  if (url.searchParams.get('panelPassword') !== PANEL_PASSWORD) return socket.destroy();
-  const proxy = viewerProxies.get(username);
-  if (!proxy) return socket.destroy();
-  req.url = req.url.replace(`/view/${username}`, '') || '/';
-  try { proxy.upgrade(req, socket, head); } catch { socket.destroy(); }
-});
+// ===================== ÖZEL HAREKET MODLARI =====================
+function updateBotBehavior(bot, state) {
+  if (state.loops) {
+    state.loops.forEach(l => clearInterval(l));
+  }
+  state.loops = [];
 
-// ===================== BOTLAR =====================
+  // Mod 1: Sadece Durduğu Yerde Zıpla ve Saniyeli Otomatik Vur
+  if (state.currentMode === 'just-jump') {
+    bot.clearControlStates();
+    
+    const jumpLoop = setInterval(() => {
+      if (!bot.entity) return;
+      bot.setControlState('jump', true);
+      setTimeout(() => { if (bot.entity) bot.setControlState('jump', false); }, 400);
+    }, 6000);
+
+    const attackMs = state.attackIntervalMs || 1000;
+    const attackLoop = setInterval(() => {
+      if (!bot.entity) return;
+      const block = bot.blockAtCursor(4);
+      if (block && block.type !== 0) {
+        bot.dig(block, true).catch(() => {});
+      } else {
+        bot.swingArm();
+      }
+    }, attackMs);
+
+    state.loops.push(jumpLoop, attackLoop);
+  }
+  // Mod 2: Dondur (Tam 10 Dakikada 1 Zıplar - Sunucudan düşürmez)
+  else if (state.currentMode === 'freeze') {
+    bot.clearControlStates();
+    
+    const freezeLoop = setInterval(() => {
+      if (!bot.entity) return;
+      bot.setControlState('jump', true);
+      setTimeout(() => { if (bot.entity) bot.setControlState('jump', false); }, 400);
+    }, 10 * 60 * 1000);
+
+    state.loops.push(freezeLoop);
+  }
+}
+
+// ===================== 2D YUKARDAN BAKMALI RADAR EKRANI =====================
+function startMapRadar(bot, cfg) {
+  const radarInterval = setInterval(() => {
+    if (!bot || !bot.entity || !bot.entity.position) return;
+
+    const botPos = bot.entity.position;
+    const radius = 5; 
+    const gridData = [];
+
+    for (let x = -radius; x <= radius; x++) {
+      for (let z = -radius; z <= radius; z++) {
+        const checkPos = botPos.offset(x, 0, z);
+        const block = bot.blockAt(checkPos);
+        
+        let color = '#2c3e50'; 
+        if (block && block.type !== 0) {
+          if (block.name.includes('stone') || block.name.includes('cobble')) color = '#7f8c8d'; 
+          else if (block.name.includes('cactus')) color = '#27ae60'; 
+          else if (block.name.includes('water')) color = '#2980b9'; 
+          else if (block.name.includes('lava')) color = '#e67e22'; 
+          else color = '#95a5a6'; 
+        }
+        
+        if (x === 0 && z === 0) {
+          color = '#e74c3c'; 
+        }
+
+        gridData.push({ x, z, color });
+      }
+    }
+
+    io.to(`bot:${cfg.username}`).emit('2d-map', { gridData, coords: { x: Math.floor(botPos.x), y: Math.floor(botPos.y), z: Math.floor(botPos.z) } });
+  }, 2000);
+
+  bot.once('end', () => clearInterval(radarInterval));
+}
+
+// ===================== BOTLARIL BAŞLATILMASI =====================
 function scheduleReconnect(cfg) {
   const cur = activeBots.get(cfg.username);
   if (cur?.reconnectTimer) return;
@@ -173,7 +226,7 @@ function scheduleReconnect(cfg) {
     if (!activeBots.get(cfg.username)?.bot) startBot(cfg);
   }, 12000);
   if (cur) cur.reconnectTimer = t;
-  else activeBots.set(cfg.username, { bot: null, connected: false, reconnectTimer: t, viewerStarted: false });
+  else activeBots.set(cfg.username, { bot: null, connected: false, reconnectTimer: t, currentMode: 'just-jump', attackIntervalMs: 1000, loops: [] });
 }
 
 function startBot(cfg, delay = 0) {
@@ -196,7 +249,7 @@ function startBot(cfg, delay = 0) {
       return;
     }
 
-    const state = { bot, connected: false, reconnectTimer: null, viewerStarted: false };
+    const state = { bot, connected: false, reconnectTimer: null, currentMode: 'just-jump', attackIntervalMs: 1000, loops: [] };
     activeBots.set(cfg.username, state);
 
     bot.once('spawn', () => {
@@ -208,19 +261,10 @@ function startBot(cfg, delay = 0) {
         if (activeBots.get(cfg.username) === state) {
           bot.chat(`/login ${cfg.password}`);
           console.log(`[${cfg.username}] /login gönderildi`);
+          updateBotBehavior(bot, state);
+          startMapRadar(bot, cfg);
         }
       }, 1800);
-
-      if (!state.viewerStarted) {
-        const idx = BOT_CONFIGS.findIndex(c => c.username === cfg.username);
-        try {
-          mineflayerViewer(bot, { port: 3100 + idx, firstPerson: false, viewDistance: 4 });
-          state.viewerStarted = true;
-          console.log(`[${cfg.username}] viewer açıldı`);
-        } catch (e) {
-          console.error(`[${cfg.username}] viewer hata: ${e.message}`);
-        }
-      }
     });
 
     bot.on('message', msg => {
@@ -229,6 +273,7 @@ function startBot(cfg, delay = 0) {
 
     bot.on('end', () => {
       state.connected = false;
+      if (state.loops) state.loops.forEach(l => clearInterval(l));
       if (activeBots.get(cfg.username) === state) activeBots.delete(cfg.username);
       io.emit('bot-status', { username: cfg.username, connected: false });
       scheduleReconnect(cfg);
@@ -247,7 +292,3 @@ server.listen(PORT, '0.0.0.0', () => {
 process.on('SIGTERM', () => {
   for (const s of activeBots.values()) {
     if (s.reconnectTimer) clearTimeout(s.reconnectTimer);
-    try { s.bot?.quit(); } catch {}
-  }
-  process.exit(0);
-});

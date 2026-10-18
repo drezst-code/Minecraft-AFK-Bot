@@ -17,8 +17,8 @@ const MC_PORT = Number(process.env.MC_PORT || 25565);
 const MC_VERSION = process.env.MC_VERSION || '1.21.1';
 const PANEL_PASSWORD = process.env.PANEL_PASSWORD;
 
-if (!PANEL_PASSWORD || PANEL_PASSWORD.length < 12) {
-  console.error('PANEL_PASSWORD ortam değişkenini en az 12 karakter olarak ayarla.');
+if (!PANEL_PASSWORD || PANEL_PASSWORD.length < 6) {
+  console.error('PANEL_PASSWORD ortam değişkenini en az 6 karakter olarak ayarla.');
   process.exit(1);
 }
 

@@ -153,7 +153,7 @@ io.on('connection', socket => {
 server.on('upgrade', (req, socket, head) => {
   const m = req.url?.match(/^\/view\/([A-Za-z0-9_]{3,16})/);
   if (!m) return socket.destroy();
-  const username = m[1]; // Eski koddaki kritik yönlendirme hatası düzeltildi
+  const username = m;
   if (!validBot(username)) return socket.destroy();
   const url = new URL(req.url, 'http://x');
   if (url.searchParams.get('panelPassword') !== PANEL_PASSWORD) return socket.destroy();
@@ -165,7 +165,6 @@ server.on('upgrade', (req, socket, head) => {
 
 // ===================== NUEKKIS AFK & FARM ENTEGRASYONU =====================
 function startNuekkisLoop(bot) {
-  // 1. Döngü: Klasik Nuekkis Wiggle (Rastgele Hareketler)
   const afkInterval = setInterval(() => {
     if (!bot || !bot.entity) return;
 
@@ -184,7 +183,6 @@ function startNuekkisLoop(bot) {
     }, 1000);
   }, 6000);
 
-  // 2. Döngü: Otomatik Sol Tık / Kazma Döngüsü
   const farmInterval = setInterval(() => {
     if (!bot || !bot.entity) return;
 
@@ -277,6 +275,7 @@ function startBot(cfg, delay = 0) {
 }
 
 // ===================== BAŞLAT =====================
+// Render port taramasını geçmesi için host adresi '0.0.0.0' açıkça eklendi
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Panel hazır → port ${PORT}`);
   BOT_CONFIGS.forEach((cfg, i) => startBot(cfg, i * 3500));

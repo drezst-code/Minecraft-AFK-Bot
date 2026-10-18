@@ -16,7 +16,7 @@ const SERVER_PORT = 25565;
 const MC_VERSION = '1.21.1';
 
 // Web paneli giriş şifreni burada değiştir.
-const PANEL_PASSWORD = 'BURAYA_GUCLU_PANEL_SIFRESI_YAZ';
+const PANEL_PASSWORD = 'MavenPanel8274';
 
 // Bot isimleri ve sunucudaki /login şifreleri.
 const BOT_CONFIGS = [

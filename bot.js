@@ -149,27 +149,25 @@ io.on('connection', socket => {
     state.bot.look(yaw, Math.max(-Math.PI/2, Math.min(Math.PI/2, pitch)), true).catch(() => {});
   });
 
-  // Arayüzden tetiklenecek Yeni Mod Kontrolleri
+  // Panel butonlarından gelen yeni mod emirleri
   socket.on('set-bot-mode', data => {
     if (!data || !validBot(data.botName)) return;
     const state = activeBots.get(data.botName);
     if (!state || !state.bot) return;
 
-    state.currentMode = data.mode; // 'nuekkis', 'just-jump', 'freeze'
+    state.currentMode = data.mode;
     if (data.attackSeconds) {
       state.attackIntervalMs = Number(data.attackSeconds) * 1000;
     }
     
-    // Zamanlayıcıları sıfırla ve yeni mod ayarlarıyla yeniden başlat
     updateBotBehavior(state.bot, state);
-    console.log(`[${data.botName}] Yeni Moda Geçti: ${data.mode}`);
   });
 });
 
 server.on('upgrade', (req, socket, head) => {
   const m = req.url?.match(/^\/view\/([A-Za-z0-9_]{3,16})/);
-  if (!m) return socket.destroy();
-  const username = m[1]; // DÜZELTME: 3D görüntünün gelmeme sorunu m yerine m[1] alınarak çözüldü
+  if (!m || !m[1]) return socket.destroy();
+  const username = m[1]; 
   if (!validBot(username)) return socket.destroy();
   const url = new URL(req.url, 'http://x');
   if (url.searchParams.get('panelPassword') !== PANEL_PASSWORD) return socket.destroy();
@@ -179,16 +177,52 @@ server.on('upgrade', (req, socket, head) => {
   try { proxy.upgrade(req, socket, head); } catch { socket.destroy(); }
 });
 
-// ===================== GELİŞMİŞ MOD MEKANİZMALARI =====================
+// ===================== MOD MEKANİZMALARI =====================
 function updateBotBehavior(bot, state) {
-  // Eski çalışan döngüleri temizle
   if (state.loops) {
     state.loops.forEach(l => clearInterval(l));
   }
   state.loops = [];
 
-  // 1. MOD: Klasik Nuekkis (Rastgele Her Yere Tıklayan ve Gezen Mod)
-  if (state.currentMode === 'nuekkis') {
+  // 1. MOD: Sadece Zıpla ve Saniyeli Otomatik Vur (Varsayılan - Etrafa rastgele tıklamaz!)
+  if (state.currentMode === 'just-jump') {
+    bot.clearControlStates();
+    
+    const jumpLoop = setInterval(() => {
+      if (!bot.entity) return;
+      bot.setControlState('jump', true);
+      setTimeout(() => { if (bot.entity) bot.setControlState('jump', false); }, 500);
+    }, 6000);
+
+    const attackMs = state.attackIntervalMs || 1000;
+    const attackLoop = setInterval(() => {
+      if (!bot.entity) return;
+      const block = bot.blockAtCursor(4);
+      if (block && block.type !== 0) {
+        bot.dig(block, true).catch(() => {});
+      } else {
+        bot.swingArm();
+      }
+    }, attackMs);
+
+    state.loops.push(jumpLoop, attackLoop);
+  }
+
+  // 2. MOD: Dondur (Sadece 10 Dakikada 1 Zıplar - Kick yememe koruması)
+  else if (state.currentMode === 'freeze') {
+    bot.clearControlStates();
+    
+    const freezeLoop = setInterval(() => {
+      if (!bot.entity) return;
+      bot.setControlState('jump', true);
+      setTimeout(() => { if (bot.entity) bot.setControlState('jump', false); }, 500);
+    }, 10 * 60 * 1000);
+
+    state.loops.push(freezeLoop);
+  }
+
+  // 3. MOD: Eski Klasik Nuekkis Modu
+  else if (state.currentMode === 'nuekkis') {
     const afk = setInterval(() => {
       if (!bot.entity) return;
       bot.setControlState('jump', Math.random() > 0.5);
@@ -212,43 +246,6 @@ function updateBotBehavior(bot, state) {
     }, 1200);
 
     state.loops.push(afk, farm);
-  }
-
-  // 2. MOD: Sadece Zıpla ve Saniye Ayarlı Otomatik Vur (Etrafa Rastgele Tıklamaz!)
-  else if (state.currentMode === 'just-jump') {
-    // Sadece durduğu yerde zıplama döngüsü (6 saniyede bir)
-    const jumpLoop = setInterval(() => {
-      if (!bot.entity) return;
-      bot.setControlState('jump', true);
-      setTimeout(() => { if (bot.entity) bot.setControlState('jump', false); }, 500);
-    }, 6000);
-
-    // Kullanıcının panelden seçtiği saniyede bir otomatik vurma döngüsü
-    const attackMs = state.attackIntervalMs || 1000;
-    const attackLoop = setInterval(() => {
-      if (!bot.entity) return;
-      const block = bot.blockAtCursor(4);
-      if (block && block.type !== 0) {
-        bot.dig(block, true).catch(() => {});
-      } else {
-        bot.swingArm();
-      }
-    }, attackMs);
-
-    state.loops.push(jumpLoop, attackLoop);
-  }
-
-  // 3. MOD: Dondur (Sadece 10 Dakikada 1 Zıplar - Kick yememek için en hafifi)
-  else if (state.currentMode === 'freeze') {
-    bot.clearControlStates();
-    const freezeLoop = setInterval(() => {
-      if (!bot.entity) return;
-      bot.setControlState('jump', true);
-      console.log(`[${bot.username}] Dondurma modunda anti-kick zıplaması yapıldı.`);
-      setTimeout(() => { if (bot.entity) bot.setControlState('jump', false); }, 500);
-    }, 10 * 60 * 1000); // Tam 10 dakikada bir çalışır
-
-    state.loops.push(freezeLoop);
   }
 }
 
@@ -279,3 +276,17 @@ function startBot(cfg, delay = 0) {
       });
     } catch (e) {
       console.error(`[${cfg.username}] ${e.message}`);
+      scheduleReconnect(cfg);
+      return;
+    }
+
+    const state = { bot, connected: false, reconnectTimer: null, viewerStarted: false, currentMode: 'just-jump', attackIntervalMs: 1000, loops: [] };
+    activeBots.set(cfg.username, state);
+
+    bot.once('spawn', () => {
+      state.connected = true;
+      io.emit('bot-status', { username: cfg.username, connected: true });
+      console.log(`[${cfg.username}] spawn oldu`);
+
+      setTimeout(() => {
+        if (activeBots.get(cfg.username) === state) {

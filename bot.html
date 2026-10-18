@@ -3,132 +3,104 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Bot Kontrolü</title>
+<title>Bot Kontrol</title>
 <style>
 :root{color-scheme:dark;--bg:#0d1117;--panel:#161e2a;--border:#2a3548;--accent:#22c55e;--text:#e8eef5;--muted:#9aa8bc}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px system-ui,-apple-system,sans-serif}
-header{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 18px;background:#131a24;border-bottom:1px solid var(--border);flex-wrap:wrap}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px system-ui,sans-serif}
+header{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;background:#131a24;border-bottom:1px solid var(--border)}
 a{color:#4ade80;text-decoration:none;font-weight:600}
 button,input{font:inherit;border-radius:8px;border:1px solid var(--border);padding:10px 14px;background:#0f1620;color:#fff}
-button{cursor:pointer}button:hover{border-color:var(--accent)}button.primary{background:#166534;border-color:#22c55e;color:#fff}
-main{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(280px,1fr);gap:14px;padding:14px;max-width:1400px;margin:auto}
+button{cursor:pointer}button.primary{background:#166534;border-color:#22c55e}
+main{display:grid;grid-template-columns:1.6fr 1fr;gap:14px;padding:14px;max-width:1400px;margin:auto}
 .panel{background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden}
-.panel h2{font-size:15px;margin:0;padding:12px 14px;border-bottom:1px solid var(--border);background:#1a2330}
-.viewerWrap{position:relative;background:#080b10;min-height:420px}
-.viewerWrap iframe{width:100%;height:500px;border:0;display:block;background:#080b10}
-#lookHint{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);background:#10141bcc;border:1px solid #465165;border-radius:8px;padding:6px 12px;color:#dbe4ef;font-size:12px;pointer-events:none}
-.controls{padding:14px;display:grid;gap:10px}
-.keygrid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;max-width:280px;margin:0 auto}
-.keygrid button{min-height:48px;touch-action:none;user-select:none}
-.chat{height:260px;overflow:auto;padding:10px;background:#0b0f15;font:12px ui-monospace,monospace;white-space:pre-wrap}
+.panel h2{font-size:15px;margin:0;padding:12px 14px;border-bottom:1px solid var(--border)}
+.viewerWrap{position:relative;background:#080b10}
+.viewerWrap iframe{width:100%;height:480px;border:0;display:block}
+#lookHint{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);background:#10141bcc;border:1px solid #465165;border-radius:8px;padding:6px 12px;font-size:12px;pointer-events:none}
+.controls{padding:14px}
+.keygrid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;max-width:260px;margin:10px auto}
+.keygrid button{min-height:46px;touch-action:none}
+.chat{height:240px;overflow:auto;padding:10px;background:#0b0f15;font:12px ui-monospace,monospace}
 .chatline{padding:2px 0;border-bottom:1px solid #1d2633}
 .send{display:flex;gap:6px;padding:10px}
-.send input{min-width:0;flex:1}
-.small{font-size:12px;color:var(--muted);line-height:1.4}
-.state{color:var(--muted)}
-.error{color:#fca5a5}
-@media(max-width:850px){main{grid-template-columns:1fr}.viewerWrap iframe{height:380px}}
+.send input{flex:1}
+.small{font-size:12px;color:var(--muted)}
+@media(max-width:850px){main{grid-template-columns:1fr}.viewerWrap iframe{height:360px}}
 </style>
 </head>
 <body>
 <header>
-  <div>
-    <strong>⛏ Bot: <span id="botName">...</span></strong>
-    <div id="status" class="state">Bağlanıyor...</div>
-  </div>
-  <a href="/">← Bot listesine dön</a>
+  <div><strong>Bot: <span id="botName"></span></strong><div id="status" class="small">Bağlanıyor...</div></div>
+  <a href="/">← Listeye dön</a>
 </header>
 <main>
   <section class="panel">
-    <h2>3D Dünya Görüntüsü</h2>
+    <h2>3D Görüntü</h2>
     <div class="viewerWrap" id="viewerWrap">
-      <iframe id="viewer" title="Minecraft 3D görüntü" allow="fullscreen"></iframe>
-      <div id="lookHint">Bakış için görüntü üzerinde sağ tık basılı tut + sürükle</div>
+      <iframe id="viewer" allow="fullscreen"></iframe>
+      <div id="lookHint">Bakış için sağ tık basılı tut + sürükle</div>
     </div>
     <div class="controls">
-      <div class="small">Klavye: W A S D · Space zıpla · Shift eğil · Ctrl koş. Sayfa boş alanına tıklayıp kullan.</div>
+      <div class="small">W A S D · Space zıpla · Shift eğil · Ctrl koş</div>
       <div class="keygrid">
-        <button class="empty"></button><button data-key="forward">W ▲</button><button class="empty"></button>
+        <button></button><button data-key="forward">W ▲</button><button></button>
         <button data-key="left">A ◀</button><button data-key="back">S ▼</button><button data-key="right">D ▶</button>
         <button data-key="sneak">Shift</button><button data-key="jump">Space</button><button data-key="sprint">Ctrl</button>
       </div>
-      <button id="stop" class="primary" style="width:100%">Hareketi Durdur</button>
+      <button id="stop" class="primary" style="width:100%;margin-top:8px">Durdur</button>
     </div>
   </section>
   <section class="panel">
-    <h2>Sohbet & Komutlar</h2>
+    <h2>Sohbet</h2>
     <div id="chat" class="chat"></div>
     <form id="sendForm" class="send">
-      <input id="message" maxlength="256" placeholder="Mesaj veya /komut..." autocomplete="off">
+      <input id="message" maxlength="256" placeholder="Mesaj veya /komut" autocomplete="off">
       <button class="primary" type="submit">Gönder</button>
     </form>
-    <div class="controls">
-      <div id="notice" class="small"></div>
-      <div class="small">Komutlar botun hesabından gönderilir. Bot bağlı değilse işlem yapılmaz.</div>
-    </div>
+    <div class="controls"><div id="notice" class="small"></div></div>
   </section>
 </main>
 <script src="/socket.io/socket.io.js"></script>
 <script>
-const username = decodeURIComponent(location.pathname.split('/').filter(Boolean).pop() || '');
+const username = decodeURIComponent(location.pathname.split('/').pop());
 const password = sessionStorage.getItem('panelPassword');
-const statusEl = document.getElementById('status');
-const chat = document.getElementById('chat');
-const notice = document.getElementById('notice');
-
 document.getElementById('botName').textContent = username;
+if (!password) { location.href = '/'; throw 0; }
 
-if (!password) {
-  document.body.innerHTML = '<main style="padding:40px;text-align:center"><h2>Önce giriş yapmalısın</h2><p><a href="/">Giriş sayfasına dön</a></p></main>';
-  throw new Error('Oturum yok');
-}
+document.getElementById('viewer').src = `/view/${encodeURIComponent(username)}/?panelPassword=${encodeURIComponent(password)}`;
 
-document.getElementById('viewer').src = '/view/' + encodeURIComponent(username) + '/?panelPassword=' + encodeURIComponent(password);
-
-const socket = io({ auth: { password }, transports: ['websocket', 'polling'] });
-
-socket.on('connect', () => {
-  socket.emit('select-bot', username);
-  notice.textContent = 'Panel bağlı.';
-});
-socket.on('connect_error', (e) => {
-  statusEl.textContent = 'Bağlantı hatası: ' + e.message;
-  statusEl.className = 'error';
-});
-socket.on('bot-status', (data) => {
-  if (data.username === username) {
-    statusEl.textContent = data.connected ? '● Sunucuya bağlı' : '○ Bağlı değil';
-    statusEl.style.color = data.connected ? '#4ade80' : '#fca5a5';
+const socket = io({ auth: { password } });
+socket.on('connect', () => socket.emit('select-bot', username));
+socket.on('bot-status', d => {
+  if (d.username === username) {
+    document.getElementById('status').textContent = d.connected ? '● Bağlı' : '○ Bağlı değil';
+    document.getElementById('status').style.color = d.connected ? '#4ade80' : '#fca5a5';
   }
 });
-socket.on('log', (data) => {
-  const line = document.createElement('div');
-  line.className = 'chatline';
-  line.textContent = data.text || '';
-  chat.append(line);
-  chat.scrollTop = chat.scrollHeight;
-  while (chat.children.length > 300) chat.firstChild.remove();
+socket.on('log', d => {
+  const el = document.createElement('div');
+  el.className = 'chatline';
+  el.textContent = d.text || '';
+  document.getElementById('chat').append(el);
+  document.getElementById('chat').scrollTop = 99999;
 });
-socket.on('notice', (text) => { notice.textContent = text; });
+socket.on('notice', t => document.getElementById('notice').textContent = t);
 
-document.getElementById('sendForm').addEventListener('submit', (e) => {
+document.getElementById('sendForm').onsubmit = e => {
   e.preventDefault();
   const input = document.getElementById('message');
   const text = input.value.trim();
-  if (!text) return;
-  socket.emit('command', { botName: username, text });
+  if (text) socket.emit('command', { botName: username, text });
   input.value = '';
-});
+};
 
 const held = new Set();
 function sendControls() {
-  const controls = {};
-  for (const k of ['forward', 'back', 'left', 'right', 'jump', 'sprint', 'sneak']) {
-    controls[k] = held.has(k);
-  }
-  socket.emit('move', { botName: username, controls });
+  const c = {};
+  ['forward','back','left','right','jump','sprint','sneak'].forEach(k => c[k] = held.has(k));
+  socket.emit('move', { botName: username, controls: c });
 }
-function keyMap(e) {
+function mapKey(e) {
   const k = e.key.toLowerCase();
   if (k === 'w' || k === 'arrowup') return 'forward';
   if (k === 's' || k === 'arrowdown') return 'back';
@@ -137,56 +109,43 @@ function keyMap(e) {
   if (k === ' ') return 'jump';
   if (k === 'control') return 'sprint';
   if (k === 'shift') return 'sneak';
-  return null;
 }
-document.addEventListener('keydown', (e) => {
-  if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
-  const k = keyMap(e);
-  if (!k) return;
-  e.preventDefault();
-  if (!held.has(k)) { held.add(k); sendControls(); }
-});
-document.addEventListener('keyup', (e) => {
-  const k = keyMap(e);
+document.onkeydown = e => {
+  if (['INPUT'].includes(document.activeElement.tagName)) return;
+  const k = mapKey(e);
+  if (k && !held.has(k)) { e.preventDefault(); held.add(k); sendControls(); }
+};
+document.onkeyup = e => {
+  const k = mapKey(e);
   if (k && held.delete(k)) sendControls();
-});
-window.addEventListener('blur', () => { held.clear(); sendControls(); });
+};
+window.onblur = () => { held.clear(); sendControls(); };
 
 document.querySelectorAll('[data-key]').forEach(btn => {
-  const key = btn.dataset.key;
-  const down = (e) => { e.preventDefault(); held.add(key); sendControls(); };
-  const up = (e) => { e.preventDefault(); held.delete(key); sendControls(); };
-  btn.addEventListener('pointerdown', down);
-  btn.addEventListener('pointerup', up);
-  btn.addEventListener('pointercancel', up);
-  btn.addEventListener('pointerleave', (e) => { if (e.buttons === 0) up(e); });
+  const k = btn.dataset.key;
+  btn.onpointerdown = e => { e.preventDefault(); held.add(k); sendControls(); };
+  btn.onpointerup = btn.onpointercancel = btn.onpointerleave = e => { e.preventDefault(); held.delete(k); sendControls(); };
 });
-document.getElementById('stop').addEventListener('click', () => { held.clear(); sendControls(); });
+document.getElementById('stop').onclick = () => { held.clear(); sendControls(); };
 
-// Look controls – right mouse drag
+// Look
 const wrap = document.getElementById('viewerWrap');
-let dragging = false, lastX = 0, lastY = 0, yaw = 0, pitch = 0;
-wrap.addEventListener('contextmenu', (e) => e.preventDefault());
-wrap.addEventListener('pointerdown', (e) => {
-  if (e.button !== 2 || e.target.closest('button')) return;
-  dragging = true;
-  lastX = e.clientX;
-  lastY = e.clientY;
+let drag = false, lx, ly, yaw = 0, pitch = 0;
+wrap.oncontextmenu = e => e.preventDefault();
+wrap.onpointerdown = e => {
+  if (e.button !== 2) return;
+  drag = true; lx = e.clientX; ly = e.clientY;
   wrap.setPointerCapture?.(e.pointerId);
-});
-wrap.addEventListener('pointermove', (e) => {
-  if (!dragging) return;
-  const dx = e.clientX - lastX, dy = e.clientY - lastY;
-  lastX = e.clientX; lastY = e.clientY;
-  yaw -= dx * 0.008;
-  pitch -= dy * 0.008;
+};
+wrap.onpointermove = e => {
+  if (!drag) return;
+  yaw -= (e.clientX - lx) * 0.008;
+  pitch -= (e.clientY - ly) * 0.008;
   pitch = Math.max(-1.45, Math.min(1.45, pitch));
+  lx = e.clientX; ly = e.clientY;
   socket.emit('look', { botName: username, yaw, pitch });
-});
-function stopDrag() { dragging = false; }
-wrap.addEventListener('pointerup', stopDrag);
-wrap.addEventListener('pointercancel', stopDrag);
-window.addEventListener('beforeunload', () => { held.clear(); sendControls(); });
+};
+wrap.onpointerup = wrap.onpointercancel = () => drag = false;
 </script>
 </body>
 </html>

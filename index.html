@@ -6,32 +6,30 @@
 <title>Maven Bot Paneli</title>
 <style>
 :root{color-scheme:dark;--bg:#0f1419;--card:#1a2332;--border:#2d3a4d;--accent:#22c55e;--text:#e8eef5;--muted:#9aa8bc}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px system-ui,-apple-system,Segoe UI,sans-serif}
-main{max-width:900px;margin:8vh auto;padding:20px}
-.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:28px;box-shadow:0 8px 32px rgba(0,0,0,.3)}
-h1{margin:0 0 8px;font-size:26px}p{color:var(--muted);margin:0 0 20px;line-height:1.5}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px system-ui,sans-serif}
+main{max-width:860px;margin:7vh auto;padding:20px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:28px}
+h1{margin:0 0 6px}p{color:var(--muted);margin:0 0 18px}
 .row{display:flex;gap:10px;flex-wrap:wrap}
 input,button{font:inherit;border-radius:10px;border:1px solid var(--border);padding:12px 16px}
-input{background:#0d1117;color:#fff;flex:1;min-width:200px}
+input{background:#0d1117;color:#fff;flex:1;min-width:180px}
 button{background:var(--accent);color:#052e16;font-weight:700;cursor:pointer;border:none}
-button:hover{filter:brightness(1.08)}
-.bot{display:flex;justify-content:space-between;align-items:center;gap:12px;background:#111827;padding:14px 16px;border-radius:12px;margin-top:10px;border:1px solid var(--border)}
+.bot{display:flex;justify-content:space-between;align-items:center;gap:12px;background:#111827;padding:14px;border-radius:12px;margin-top:10px;border:1px solid var(--border)}
 .bot a{color:#4ade80;text-decoration:none;font-weight:600}
 .status{font-size:13px;color:var(--muted)}
-#bots{margin-top:24px}#message{min-height:22px;color:#fbbf24;margin:12px 0}
-@media(max-width:600px){.bot{flex-direction:column;align-items:flex-start}}
+#bots{margin-top:20px}#message{min-height:20px;color:#fbbf24;margin:10px 0}
 </style>
 </head>
 <body>
 <main>
 <section class="card">
   <h1>⛏ Maven Minecraft Bot Paneli</h1>
-  <p>Panel şifreni gir. Bot listesi açıldığında kontrol etmek istediğin botu seç.</p>
+  <p>Panel şifresini gir. Sonra kontrol etmek istediğin botu seç.</p>
   <form id="loginForm" class="row">
-    <input id="password" type="password" placeholder="Panel şifresi" autocomplete="current-password" required>
+    <input id="password" type="password" placeholder="Panel şifresi" required>
     <button type="submit">Giriş yap</button>
   </form>
-  <p id="message" role="status"></p>
+  <p id="message"></p>
   <div id="bots" hidden></div>
 </section>
 </main>
@@ -41,37 +39,26 @@ const pass = document.getElementById('password');
 const message = document.getElementById('message');
 const list = document.getElementById('bots');
 
-form.addEventListener('submit', async (e) => {
+form.addEventListener('submit', async e => {
   e.preventDefault();
   const password = pass.value;
   try {
     const r = await fetch('/api/bots', { headers: { 'x-panel-password': password } });
-    if (!r.ok) throw new Error('Şifre yanlış veya sunucu cevap vermiyor.');
+    if (!r.ok) throw new Error('Şifre yanlış');
     const bots = await r.json();
     sessionStorage.setItem('panelPassword', password);
     list.innerHTML = '';
     bots.forEach(bot => {
-      const item = document.createElement('div');
-      item.className = 'bot';
-      const left = document.createElement('div');
-      const name = document.createElement('strong');
-      name.textContent = bot.username;
-      const status = document.createElement('div');
-      status.className = 'status';
-      status.textContent = bot.connected ? '● Sunucuya bağlı' : '○ Bağlanıyor / çevrimdışı';
-      left.append(name, status);
-      const a = document.createElement('a');
-      a.textContent = 'Kontrol et →';
-      a.href = '/bot/' + encodeURIComponent(bot.username);
-      item.append(left, a);
-      list.append(item);
+      const div = document.createElement('div');
+      div.className = 'bot';
+      div.innerHTML = `<div><strong>${bot.username}</strong><div class="status">${bot.connected ? '● Bağlı' : '○ Bağlanıyor'}</div></div><a href="/bot/${encodeURIComponent(bot.username)}">Kontrol et →</a>`;
+      list.append(div);
     });
     list.hidden = false;
     message.textContent = 'Giriş başarılı.';
   } catch (err) {
-    sessionStorage.removeItem('panelPassword');
-    list.hidden = true;
     message.textContent = err.message;
+    list.hidden = true;
   }
 });
 </script>

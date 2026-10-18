@@ -149,7 +149,7 @@ io.on('connection', socket => {
     state.bot.look(yaw, Math.max(-Math.PI/2, Math.min(Math.PI/2, pitch)), true).catch(() => {});
   });
 
-  // Panel butonlarından gelen yeni mod emirleri
+  // Panel buton kontrol sinyalleri
   socket.on('set-bot-mode', data => {
     if (!data || !validBot(data.botName)) return;
     const state = activeBots.get(data.botName);
@@ -167,7 +167,7 @@ io.on('connection', socket => {
 server.on('upgrade', (req, socket, head) => {
   const m = req.url?.match(/^\/view\/([A-Za-z0-9_]{3,16})/);
   if (!m || !m[1]) return socket.destroy();
-  const username = m[1]; 
+  const username = m[1]; // DÜZELTME: Güvenli regex grup eşleşmesi sağlandı
   if (!validBot(username)) return socket.destroy();
   const url = new URL(req.url, 'http://x');
   if (url.searchParams.get('panelPassword') !== PANEL_PASSWORD) return socket.destroy();
@@ -184,7 +184,7 @@ function updateBotBehavior(bot, state) {
   }
   state.loops = [];
 
-  // 1. MOD: Sadece Zıpla ve Saniyeli Otomatik Vur (Varsayılan - Etrafa rastgele tıklamaz!)
+  // 1. MOD: Sadece Zıpla ve Saniyeli Otomatik Vur (Etrafa rastgele tıklamaz!)
   if (state.currentMode === 'just-jump') {
     bot.clearControlStates();
     

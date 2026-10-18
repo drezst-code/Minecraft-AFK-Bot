@@ -149,7 +149,6 @@ io.on('connection', socket => {
     state.bot.look(yaw, Math.max(-Math.PI/2, Math.min(Math.PI/2, pitch)), true).catch(() => {});
   });
 
-  // Panel buton kontrol sinyalleri
   socket.on('set-bot-mode', data => {
     if (!data || !validBot(data.botName)) return;
     const state = activeBots.get(data.botName);
@@ -159,22 +158,25 @@ io.on('connection', socket => {
     if (data.attackSeconds) {
       state.attackIntervalMs = Number(data.attackSeconds) * 1000;
     }
-    
     updateBotBehavior(state.bot, state);
   });
 });
 
 server.on('upgrade', (req, socket, head) => {
   const m = req.url?.match(/^\/view\/([A-Za-z0-9_]{3,16})/);
-  if (!m || !m[1]) return socket.destroy();
-  const username = m[1]; // DÜZELTME: Güvenli regex grup eşleşmesi sağlandı
+  if (!m) return socket.destroy();
+  const username = m[1]; 
   if (!validBot(username)) return socket.destroy();
   const url = new URL(req.url, 'http://x');
   if (url.searchParams.get('panelPassword') !== PANEL_PASSWORD) return socket.destroy();
   const proxy = viewerProxies.get(username);
   if (!proxy) return socket.destroy();
   req.url = req.url.replace(`/view/${username}`, '') || '/';
-  try { proxy.upgrade(req, socket, head); } catch { socket.destroy(); }
+  try { 
+    proxy.upgrade(req, socket, head); 
+  } catch (e) { 
+    socket.destroy(); 
+  }
 });
 
 // ===================== MOD MEKANİZMALARI =====================
@@ -184,7 +186,6 @@ function updateBotBehavior(bot, state) {
   }
   state.loops = [];
 
-  // 1. MOD: Sadece Zıpla ve Saniyeli Otomatik Vur (Etrafa rastgele tıklamaz!)
   if (state.currentMode === 'just-jump') {
     bot.clearControlStates();
     
@@ -207,8 +208,6 @@ function updateBotBehavior(bot, state) {
 
     state.loops.push(jumpLoop, attackLoop);
   }
-
-  // 2. MOD: Dondur (Sadece 10 Dakikada 1 Zıplar - Kick yememe koruması)
   else if (state.currentMode === 'freeze') {
     bot.clearControlStates();
     
@@ -220,8 +219,6 @@ function updateBotBehavior(bot, state) {
 
     state.loops.push(freezeLoop);
   }
-
-  // 3. MOD: Eski Klasik Nuekkis Modu
   else if (state.currentMode === 'nuekkis') {
     const afk = setInterval(() => {
       if (!bot.entity) return;
@@ -290,3 +287,10 @@ function startBot(cfg, delay = 0) {
 
       setTimeout(() => {
         if (activeBots.get(cfg.username) === state) {
+          bot.chat(`/login ${cfg.password}`);
+          console.log(`[${cfg.username}] /login gönderildi`);
+          updateBotBehavior(bot, state);
+        }
+      }, 1800);
+
+      if (!state.viewerStarted) {
